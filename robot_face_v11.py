@@ -492,7 +492,7 @@ class StateMachine:
         if mapping is None or expr_name == self.last_gimbal_expr:
             return
         pan_a, tilt_a = mapping
-        self.gimbal.move_to(pan_a, tilt_a, 500, blocking=False)
+        self.gimbal.move_to(pan_a, tilt_a, 800, blocking=False)
         self.last_gimbal_expr = expr_name
         print(f'[GIMBAL] {expr_name} -> P{pan_a} T{tilt_a}')
 
@@ -3687,29 +3687,56 @@ class VoiceManager:
             self._pending = False
 
     def _call_hermes(self, txt):
-        """调用 Hermes AI Agent 自主决策"""
-        import subprocess
-        HERMES_BIN = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/hermes")
+        """调用 Hermes API Server (v0.15.1, 常驻端口8086，无冷启动)"""
+        import json as _json, urllib.request as _ur
+
+        reply = None
+
+        # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
-            # hermes chat -q (单次查询) -Q (静默模式，无banner)
-            result = subprocess.run(
-                [HERMES_BIN, "chat", "-q", txt, "-Q"],
-                capture_output=True, text=True, timeout=120
+            _body = _json.dumps({
+                "model": "deepseek-v4-flash",
+                "messages": [{"role": "user", "content": txt}],
+                "max_tokens": 500,
+            }, ensure_ascii=False).encode("utf-8")
+            _req = _ur.Request(
+                "http://127.0.0.1:8086/v1/chat/completions",
+                data=_body,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Authorization": "Bearer local-secret-2026",
+                },
             )
-            out = result.stdout.strip()
-            if out:
-                # 过滤 session_id 等系统行，取有效回复
-                reply_lines = [l for l in out.split("\n") if l.strip() and not l.startswith("session_id:") and not l.startswith("⚠")]
-                reply = "\n".join(reply_lines) if reply_lines else out
-            else:
-                err = result.stderr.strip()[-200:] if result.stderr else ""
-                print(f"[HERMES] empty stdout, stderr tail: {err[:100]}")
-                reply = "抱歉，我没听懂"
-        except subprocess.TimeoutExpired:
-            reply = "思考时间过长"
+            with _ur.urlopen(_req, timeout=90) as _resp:
+                _data = _json.loads(_resp.read().decode("utf-8"))
+                reply = _data["choices"][0]["message"]["content"].strip()
+                _tokens = _data.get("usage", {}).get("total_tokens", "?")
+                print(f"[HERMES-API] {_tokens} tokens, reply: {reply[:50]}")
         except Exception as e:
-            reply = f"Hermes 启动失败: {e}"
-            print(f"[HERMES] Error: {e}")
+            print(f"[HERMES-API] failed: {e}, falling back to subprocess")
+
+        # ── 方式2: hermes chat -q 子进程 (回退) ──
+        if reply is None:
+            import subprocess
+            HERMES_BIN = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/hermes")
+            try:
+                result = subprocess.run(
+                    [HERMES_BIN, "chat", "-q", txt, "-Q", "--provider", "deepseek", "--source", "tool"],
+                    capture_output=True, text=True, timeout=120
+                )
+                out = result.stdout.strip()
+                if out:
+                    reply_lines = [l for l in out.split("\n") if l.strip() and not l.startswith("session_id:") and not l.startswith("⚠")]
+                    reply = "\n".join(reply_lines) if reply_lines else out
+                else:
+                    err = result.stderr.strip()[-200:] if result.stderr else ""
+                    print(f"[HERMES] empty stdout, stderr tail: {err[:100]}")
+                    reply = "抱歉，我没听懂"
+            except subprocess.TimeoutExpired:
+                reply = "思考时间过长"
+            except Exception as e:
+                reply = f"Hermes 启动失败: {e}"
+                print(f"[HERMES] Error: {e}")
         # 通过 ws_server 发送 todo 风格的大卡片
         self.reply_text = reply
         try:

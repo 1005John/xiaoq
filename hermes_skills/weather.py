@@ -1,35 +1,50 @@
-"""天气_Hermes技能 - 查询实时天气"""
+"""天气_Hermes技能 - 读取缓存天气数据（data_collector 每30分钟更新）"""
 import json
 import logging
-import urllib.request
+import time
+from pathlib import Path
 from hermes_skills.base import HermesSkill
 
 log = logging.getLogger("hermes_skills.weather")
 
-# 重庆默认
-LAT, LON = 29.56, 106.55
+# 缓存路径：hermes_skills/../data/weather_cache.json
+_CACHE_PATH = Path(__file__).parent.parent / "data" / "weather_cache.json"
+_CACHE_MAX_AGE = 3600  # 超过1小时的缓存视为过期
 
 class WeatherHermesSkill(HermesSkill):
     name = "weather"
     description = "查询天气、温度、降水、风力"
 
     def prepare(self, text: str) -> dict:
-        """获取实时天气数据"""
+        """读取缓存的天气数据，由 data_collector 后台更新"""
         weather_info = ""
         try:
-            url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m"
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-                cur = data.get("current", {})
-                temp = cur.get("temperature_2m", "?")
-                humidity = cur.get("relative_humidity_2m", "?")
-                wind = cur.get("wind_speed_10m", "?")
-                wcode = cur.get("weather_code", 0)
-            # 天气编码转文字
-            wmap = {0:"晴朗",1:"大部晴",2:"多云",3:"阴",45:"雾",48:"雾凇",51:"小毛毛雨",53:"毛毛雨",55:"大毛毛雨",61:"小雨",63:"中雨",65:"大雨",71:"小雪",73:"中雪",75:"大雪",80:"阵雨",81:"中阵雨",82:"大阵雨",95:"雷暴"}
-            weather_desc = wmap.get(wcode, f"码{wcode}")
-            weather_info = f"【当前天气】重庆 {weather_desc}，{temp}°C，湿度{humidity}%，风速{wind}km/h"
+            if _CACHE_PATH.exists():
+                with open(_CACHE_PATH, encoding="utf-8") as f:
+                    cache = json.load(f)
+                ts = cache.get("timestamp", 0)
+                age = time.time() - ts
+                data = cache.get("data", {})
+
+                temp = data.get("temperature", "?")
+                humidity = data.get("humidity", "?")
+                wind = data.get("wind_speed", "?")
+                wdesc = data.get("weather_desc", "?")
+
+                # 构建当前天气信息
+                freshness = "" if age < _CACHE_MAX_AGE else "（数据较旧）"
+                weather_info = f"【当前天气】重庆 {wdesc}，{temp}°C，湿度{humidity}%，风速{wind}km/h{freshness}"
+
+                # 追加5天预报
+                forecast = data.get("forecast", [])
+                if forecast:
+                    lines = [weather_info, "【5天预报】"]
+                    for f in forecast[:5]:
+                        lines.append(f"  {f['date']}: {f['weather_desc']} {f['temp_min']}~{f['temp_max']}°C")
+                    weather_info = "\n".join(lines)
+            else:
+                weather_info = "【天气】缓存文件不存在，等待后台采集..."
         except Exception as e:
-            weather_info = f"【天气】获取失败: {e}"
+            weather_info = f"【天气】读取缓存失败: {e}"
 
         return {"context": weather_info, "action": None, "skip_llm": False, "reply": ""}
