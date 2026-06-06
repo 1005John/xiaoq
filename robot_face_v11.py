@@ -492,7 +492,7 @@ class StateMachine:
         if mapping is None or expr_name == self.last_gimbal_expr:
             return
         pan_a, tilt_a = mapping
-        self.gimbal.move_to(pan_a, tilt_a, 800, blocking=False)
+        self.gimbal.move_to(pan_a, tilt_a, 500, blocking=False)
         self.last_gimbal_expr = expr_name
         print(f'[GIMBAL] {expr_name} -> P{pan_a} T{tilt_a}')
 
