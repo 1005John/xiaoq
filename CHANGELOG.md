@@ -1,5 +1,35 @@
 # 变更日志
 
+## [v1.2.0] - 2026-06-06
+
+### 🧠 全链路 MiMo 化
+- **LLM 切换**：deepseek-v4-flash → **MiMo-V2.5**（小米）
+- **ASR 切换**：阿里云 paraformer → **MiMo-V2.5-ASR**
+- **TTS 切换**：阿里云 qwen3-tts-flash → **MiMo-V2.5-TTS**（音色：冰糖）
+
+### 🔧 待办系统重构
+- **JSON 指令机制**：Hermes 回复中附带隐藏 JSON 指令，本地可靠执行
+- 移除本地正则匹配，完全由 Hermes 判断意图
+- 支持添加/完成/删除/查询操作
+- System prompt 强制要求 JSON 格式
+
+### 🎤 交互优化
+- **TTS 打断**：按空格时停止 TTS 播放（32ms 块检查）
+- **录音前清理**：防止音频文件追加导致 12MB 大文件
+- **麦克风设备**：改用声卡名 `seeed2micvoicec`（防编号漂移）
+
+### 📦 技能系统
+- **新建 pi-news**：标准 Hermes SKILL.md，缓存读取
+- **pi-weather 改为缓存**：不再实时调 API
+- **pi-todo 重构**：JSON 指令驱动
+
+### 🐛 修复
+- 舵机时间 T800（T500 不响应）
+- voice_tts 提醒同步调用（线程不安全导致无声）
+- Gateway 路由修复（只保留 xiaomi provider）
+
+---
+
 ## [v1.1.0] - 2026-06-06
 
 ### 🚀 性能优化

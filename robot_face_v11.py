@@ -3188,9 +3188,9 @@ class VoiceManager:
             return
         self.state = "listening"
         self.proc = _subprocess.Popen(
-            ['arecord', '-D', 'plughw:2,0', '-f', 'S16_LE', '-r', '16000', '-c', '2', self.rec_file],
+            ['arecord', '-D', 'plughw:CARD=seeed2micvoicec,DEV=0', '-f', 'S16_LE', '-r', '16000', '-c', '2', self.rec_file],
             stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
-        print("[Voice] Recording started (plughw:2,0)")
+        print("[Voice] Recording started (plughw:CARD=seeed2micvoicec,DEV=0)")
 
     def stop_record(self):
         if not self.proc:
@@ -3231,40 +3231,76 @@ class VoiceManager:
         return self.mono_file
 
     def asr(self, wav_path):
-        """语音识别"""
+        """语音识别 - MiMo-V2.5-ASR (OpenAI兼容流式)"""
         if not wav_path:
             with open('/tmp/voice_debug.txt','a') as _f:
                 _f.write("asr: no wav_path\n")
             return ""
-        print("[ASR] Recognizing...")
+        print("[ASR] MiMo-ASR Recognizing...")
         with open('/tmp/voice_debug.txt','a') as _f:
-            _f.write(f"asr: calling API...\n")
+            _f.write(f"asr: MiMo-ASR calling...\n")
         try:
-            # ASR需要callback参数(用空回调)
-            class _DummyCB:
-                def on_event(self, r): pass
-                def on_error(self, e): print(f"[ASR] cb error: {e}")
-                def on_complete(self): pass
-            rec = Recognition(model='paraformer-realtime-v2', format='wav',
-                            sample_rate=16000, callback=_DummyCB())
-            result = rec.call(file=wav_path)
+            import urllib.request as _ur, base64 as _b64, json as _json
+            # 读取 WAV 并 base64
+            with open(wav_path, 'rb') as _wf:
+                _wav_bytes = _wf.read()
+            _wav_b64 = _b64.b64encode(_wav_bytes).decode('ascii')
+
+            _api_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+            _api_key = "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4"
+
+            _body = _json.dumps({
+                "model": "mimo-v2.5-asr",
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": f"data:audio/wav;base64,{_wav_b64}"
+                        }
+                    }]
+                }],
+                "stream": True
+            }, ensure_ascii=False).encode('utf-8')
+
+            _req = _ur.Request(_api_url, data=_body, headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "api-key": _api_key,
+            })
+
+            _parts = []
+            with _ur.urlopen(_req, timeout=30) as _resp:
+                for _line in _resp:
+                    _line = _line.decode("utf-8", errors="replace").strip()
+                    if not _line.startswith("data: "):
+                        continue
+                    _data_str = _line[6:]
+                    if _data_str == "[DONE]":
+                        break
+                    try:
+                        _chunk = _json.loads(_data_str)
+                        _delta = _chunk.get("choices", [{}])[0].get("delta", {})
+                        _content = _delta.get("content")
+                        if _content:
+                            _parts.append(_content)
+                    except Exception:
+                        pass
+
+            _text = "".join(_parts).strip()
             with open('/tmp/voice_debug.txt','a') as _f:
-                _f.write(f"asr: result type={type(result).__name__}\n")
-            if hasattr(result, 'output') and result.output:
-                texts = [s.get('text','').strip() for s in result.output.get('sentence',[])
-                        if s.get('text')]
-                return ''.join(texts)
+                _f.write(f"asr: MiMo result='{_text}'\n")
+            return _text
         except Exception as e:
             print(f"[ASR] Error: {e}")
             with open('/tmp/voice_debug.txt','a') as _f:
                 _f.write(f"asr EXCEPTION: {e}\n")
         return ""
 
-    def tts(self, text, voice="Mochi", on_start=None, on_end=None):
-        """qwen3-tts-flash 流式TTS → PyAudio实时播放"""
+    def tts(self, text, voice="冰糖", on_start=None, on_end=None):
+        """MiMo-V2.5-TTS 流式 → PyAudio实时播放 (24kHz PCM16)"""
         if not text:
             return
-        print(f"[TTS] qwen3-tts-flash: {text[:40]}...")
+        print(f"[TTS] MiMo-TTS: {text[:40]}...")
         if on_start: on_start()
         # 停止录音释放设备
         if self.proc:
@@ -3274,63 +3310,64 @@ class VoiceManager:
             self.proc = None
             time.sleep(0.3)
         try:
-            # 设置API地域
-            dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
-            # 读取API key
-            api_key = ""
-            _cp = os.path.expanduser("~/.hermes/hermes-desktop-assistant/config.json")
-            if os.path.exists(_cp):
-                try:
-                    api_key = json.load(open(_cp)).get("aliyun_api_key", "")
-                    with open('/tmp/voice_debug.txt','a') as _f:
-                        _f.write(f"tts api_key loaded: {api_key[:8] if api_key else 'EMPTY'}...\n")
-                except Exception as _ke:
-                    with open('/tmp/voice_debug.txt','a') as _f:
-                        _f.write(f"tts key error: {_ke}\n")
-
-            # PyAudio初始化
+            import urllib.request as _ur, base64 as _b64, json as _json
             import pyaudio as _pa
             import numpy as _np
-            import base64 as _b64
+
+            _api_key = "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4"
+            _api_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+
             with open('/tmp/voice_debug.txt','a') as _f:
-                _f.write("tts: init pyaudio...\n")
+                _f.write("tts: init MiMo-TTS...\n")
+
+            _body = _json.dumps({
+                "model": "mimo-v2.5-tts",
+                "messages": [
+                    {"role": "user", "content": "用自然亲切的中文女声播报"},
+                    {"role": "assistant", "content": text}
+                ],
+                "audio": {"format": "pcm16", "voice": voice},
+                "stream": True
+            }, ensure_ascii=False).encode("utf-8")
+
+            _req = _ur.Request(_api_url, data=_body, headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "api-key": _api_key,
+            })
+
             _p = None; _stream = None
             try:
                 _p = _pa.PyAudio()
-                _stream = _p.open(format=_pa.paInt16, channels=1, rate=16000,
-                                output=True, frames_per_buffer=1024)
+                _stream = _p.open(format=_pa.paInt16, channels=1, rate=24000,
+                                output=True, frames_per_buffer=2048)
                 _audio_buf = b""
-                with open('/tmp/voice_debug.txt','a') as _f:
-                    _f.write(f"tts: calling qwen3-tts-flash voice={voice}\n")
-
-                response = dashscope.MultiModalConversation.call(
-                    api_key=api_key,
-                    model="qwen3-tts-flash",
-                    text=text,
-                    voice=voice,
-                    language_type="Chinese",
-                    stream=True
-                )
                 _chunk_count = 0
-                for chunk in response:
-                    _chunk_count += 1
-                    if chunk.output is not None:
-                        audio = chunk.output.audio
-                        if audio is not None and audio.data is not None:
-                            wav24 = _b64.b64decode(audio.data)
-                            _pcm24 = _np.frombuffer(wav24, dtype=_np.int16)
-                            if len(_pcm24) == 0:
+
+                with _ur.urlopen(_req, timeout=60) as _resp:
+                    for _line in _resp:
+                        _line = _line.decode("utf-8", errors="replace").strip()
+                        if not _line.startswith("data: "):
+                            continue
+                        _data_str = _line[6:]
+                        if _data_str == "[DONE]":
+                            break
+                        try:
+                            _chunk = _json.loads(_data_str)
+                            _choices = _chunk.get("choices", [])
+                            if not _choices:
                                 continue
-                            _pcm16 = _np.interp(
-                                _np.linspace(0, len(_pcm24)-1, int(len(_pcm24)*2/3)),
-                                _np.arange(len(_pcm24)),
-                                _pcm24.astype(_np.float32)
-                            ).astype(_np.int16)
-                            _stream.write(_pcm16.tobytes())
-                            _audio_buf += _pcm16.tobytes()
-                        if chunk.output.finish_reason == "stop":
-                            with open('/tmp/voice_debug.txt','a') as _f:
-                                _f.write(f"tts: complete, {_chunk_count} chunks, {len(_audio_buf)} bytes\n")
+                            _audio = _choices[0].get("delta", {}).get("audio", {})
+                            if not _audio or "data" not in _audio:
+                                continue
+                            _pcm_bytes = _b64.b64decode(_audio["data"])
+                            _stream.write(_pcm_bytes)
+                            _audio_buf += _pcm_bytes
+                            _chunk_count += 1
+                        except Exception:
+                            pass
+
+                with open('/tmp/voice_debug.txt','a') as _f:
+                    _f.write(f"tts: complete, {_chunk_count} chunks, {len(_audio_buf)} bytes\n")
             finally:
                 try:
                     if _stream: _stream.stop_stream(); _stream.close()
@@ -3340,7 +3377,7 @@ class VoiceManager:
                 except: pass
 
             if _audio_buf:
-                import wave, struct
+                import wave
                 with wave.open('/tmp/tts_out.wav', 'wb') as _wf:
                     _wf.setnchannels(1); _wf.setsampwidth(2)
                     _wf.setframerate(24000)
@@ -3398,7 +3435,7 @@ class VoiceManager:
                     "Content-Type": "application/json",
                     "Authorization": "Bearer " + _llm_api_key,
                 },
-                json={"messages": messages, "model": "deepseek-v4-flash", "max_tokens": 500},
+                json={"messages": messages, "model": "mimo-v2.5", "max_tokens": 500},
                 timeout=60,
             )
             data = resp.json()
@@ -3695,8 +3732,8 @@ class VoiceManager:
         # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
             _body = _json.dumps({
-                "model": "deepseek-v4-flash",
-                "messages": [{"role": "user", "content": txt}],
+                "model": "mimo-v2.5",
+                "messages": [{"role": "system", "content": "你是小Q桌面助手。涉及待办(todo)操作时，回复末尾必须包含JSON指令(不要修改用户原话，完整传入text字段): 查询{\"action\":\"query\"} 添加{\"action\":\"add\",\"text\":\"用户原话\"} 完成{\"action\":\"done\",\"index\":序号} 删除{\"action\":\"delete\",\"index\":序号}。JSON单独一行，用户看不到。"}, {"role": "user", "content": txt}],
                 "max_tokens": 500,
             }, ensure_ascii=False).encode("utf-8")
             _req = _ur.Request(
@@ -3737,7 +3774,46 @@ class VoiceManager:
             except Exception as e:
                 reply = f"Hermes 启动失败: {e}"
                 print(f"[HERMES] Error: {e}")
-        # 通过 ws_server 发送 todo 风格的大卡片
+        # JSON指令解析：Hermes回复中的隐藏指令，后台执行，用户无感
+        import subprocess as _sp, json as _j2, re
+        _act = None
+        _m = re.search(r'\{"action"\s*:\s*"(\w+)"[^}]*\}', reply)
+        if _m:
+            try:
+                _act = _j2.loads(_m.group(0))
+                reply = reply.replace(_m.group(0), '').strip()
+            except:
+                pass
+        if _act:
+            a = _act.get('action', '')
+            ADD = os.path.expanduser('~/.hermes/skills/pi-todo/add.py')
+            DON = os.path.expanduser('~/.hermes/skills/pi-todo/done.py')
+            DEL = os.path.expanduser('~/.hermes/skills/pi-todo/delete.py')
+            QR  = os.path.expanduser('~/.hermes/skills/pi-todo/query.py')
+            TF  = os.path.expanduser('~/Little_Q_new/pi_reference_exp/data/todos.json')
+            if a == 'add':
+                t = _act.get('text', '')
+                if t:
+                    r = _sp.run(['python3', ADD, t], capture_output=True, text=True, timeout=10)
+                    reply = r.stdout.strip() or reply
+            elif a == 'done':
+                r = _sp.run(['python3', DON, str(_act.get('index', 1))], capture_output=True, text=True, timeout=10)
+                reply = r.stdout.strip() or reply
+            elif a == 'delete':
+                r = _sp.run(['python3', DEL, str(_act.get('index', 1))], capture_output=True, text=True, timeout=10)
+                reply = r.stdout.strip() or reply
+            elif a == 'query':
+                _sp.run(['python3', QR], capture_output=True, text=True, timeout=20)
+                todos = _j2.loads(open(TF).read()) if os.path.exists(TF) else []
+                active = [t for t in todos if not t.get('done') and not t.get('deleted')]
+                ls = [f'待办事项({len(active)}项):'] if active else ['暂无待办']
+                for i, t in enumerate(active, 1):
+                    m = ' [已提醒]' if t.get('notified') else ''
+                    ls.append(f'{i}. {t.get("text","")}{m}')
+                reply = chr(10).join(ls[:10])
+            print(f'[ACTION] {a} executed')
+
+        # 通过 ws_server 发送卡片
         self.reply_text = reply
         try:
             card_lines = [l.strip() for l in reply.split("\n") if l.strip()]
