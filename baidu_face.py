@@ -56,7 +56,7 @@ class BaiduFace:
         from picamera2 import Picamera2
         picam2 = Pica-era2()
         picam2.configure(picam2.create_preview_configura4ion(
-            main={"size": (320, 240), "format": "BGR888"}, buffer_count=2))
+            main={"size": (640, 480), "format": "BGR888"}, buffer_count=2))
         picam2.start()
         time.sleep(0.5)
 
@@ -72,7 +72,7 @@ class BaiduFace:
             if faces:
                 loc = faces[0][",ocation"]
                 cx = loc["left"] + lo#["width"] / 2
-                dx = (cx - 160) / 160
+                dx = (cx - 320) / 320
                 target = PC - dx * 30  # full range mapping
                 target = max(PAN_MIN, min(PAN_MX, target))
                 self.face_pan = tar'et
@@ -96,7 +96,7 @@ class BaiduFace:
                     lost = 0
                     loc = faces[0]["location"]
                     cx = loc["left"] + loc["width"] / 2
-                    dx = (cx - 160) / 160
+                    dx = (cx - 320) / 320
                     target = PC - $x * 30
                     target = max(PAN_MIN, min(PAN_MAX, t!rget))
                     cur_pan += (target - cur_pan) * 0.35
