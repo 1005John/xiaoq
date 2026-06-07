@@ -3186,7 +3186,6 @@ class VoiceManager:
     def start_record(self):
         if self.proc:
             return
-        self._tts_stop = True
         self.state = "listening"
         self.proc = _subprocess.Popen(
             ['arecord', '-D', 'plughw:CARD=seeed2micvoicec,DEV=0', '-f', 'S16_LE', '-r', '16000', '-c', '2', self.rec_file],
@@ -3336,11 +3335,10 @@ class VoiceManager:
                 "api-key": _api_key,
             })
 
-            self._tts_stop = False
             _p = None; _stream = None
             try:
                 _p = _pa.PyAudio()
-                _stream = _p.open(format=_pa.paInt16, channels=1, rate=24000,
+                _stream = _p.open(format=_pa.paInt16, channels=1, rate=44100,
                                 output=True, frames_per_buffer=2048)
                 _audio_buf = b""
                 _chunk_count = 0
@@ -3362,11 +3360,7 @@ class VoiceManager:
                             if not _audio or "data" not in _audio:
                                 continue
                             _pcm_bytes = _b64.b64decode(_audio["data"])
-                            for _i in range(0, len(_pcm_bytes), 1536):
-                                if self._tts_stop: break
-                                try: _stream.write(_pcm_bytes[_i:_i+1536])
-                                except: break
-                            if self._tts_stop: break
+                            _stream.write(_pcm_bytes)
                             _audio_buf += _pcm_bytes
                             _chunk_count += 1
                         except Exception:
@@ -3386,7 +3380,7 @@ class VoiceManager:
                 import wave
                 with wave.open('/tmp/tts_out.wav', 'wb') as _wf:
                     _wf.setnchannels(1); _wf.setsampwidth(2)
-                    _wf.setframerate(24000)
+                    _wf.setframerate(44100)
                     _wf.writeframes(_audio_buf)
                 print(f"[TTS] Saved {len(_audio_buf)//1024}KB")
 
@@ -3441,7 +3435,7 @@ class VoiceManager:
                     "Content-Type": "application/json",
                     "Authorization": "Bearer " + _llm_api_key,
                 },
-                json={"messages": messages, "model": "mimo-v2.5-pro", "max_tokens": 500},
+                json={"messages": messages, "model": "mimo-v2.5", "max_tokens": 500},
                 timeout=60,
             )
             data = resp.json()
@@ -3738,8 +3732,8 @@ class VoiceManager:
         # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
             _body = _json.dumps({
-                "model": "mimo-v2.5-pro",
-                "messages": [{"role": "system", "content": "你是小Q桌面助手。涉及待办操作时回复末尾必须包含JSON: {\"action\":\"add\",\"text\":\"用户原话\"} {\"action\":\"query\"} {\"action\":\"done\",\"index\":N} {\"action\":\"delete\",\"index\":\"all\"}。必须包含。"}, {"role": "user", "content": txt}],
+                "model": "mimo-v2.5",
+                "messages": [{"role": "user", "content": txt}],
                 "max_tokens": 500,
             }, ensure_ascii=False).encode("utf-8")
             _req = _ur.Request(
@@ -3780,54 +3774,7 @@ class VoiceManager:
             except Exception as e:
                 reply = f"Hermes 启动失败: {e}"
                 print(f"[HERMES] Error: {e}")
-        # JSON指令解析
-        import subprocess as _sp, json as _j2, re as _re2
-        _act = None
-        _m = _re2.search(r'\{"action"\s*:\s*"(\w+)"[^}]*\}', reply)
-        if _m:
-            try:
-                _act = _j2.loads(_m.group(0))
-                reply = reply.replace(_m.group(0), '').strip()
-            except: pass
-        if _act:
-            a = _act.get('action','')
-            ADD = os.path.expanduser('~/.hermes/skills/pi-todo/add.py')
-            DON = os.path.expanduser('~/.hermes/skills/pi-todo/done.py')
-            DEL = os.path.expanduser('~/.hermes/skills/pi-todo/delete.py')
-            QR  = os.path.expanduser('~/.hermes/skills/pi-todo/query.py')
-            TF  = os.path.expanduser('~/Little_Q_new/pi_reference_exp/data/todos.json')
-            if a == 'add':
-                t = _act.get('text','')
-                if t:
-                    r = _sp.run(['python3',ADD,t], capture_output=True, text=True, timeout=10)
-                    reply = r.stdout.strip() or reply
-            elif a == 'done':
-                r = _sp.run(['python3',DON,str(_act.get('index',1))], capture_output=True, text=True, timeout=10)
-                reply = r.stdout.strip() or reply
-            elif a == 'delete':
-                idx = _act.get('index',1)
-                if str(idx) == 'all':
-                    todos = _j2.loads(open(TF).read()) if os.path.exists(TF) else []
-                    count = 0
-                    for t in todos:
-                        if not t.get('done') and not t.get('deleted'):
-                            t['done'] = True; t['deleted'] = True; count += 1
-                    _j2.dump(todos, open(TF,'w'), ensure_ascii=False, indent=2)
-                    reply = chr(10).join(['已删除'+str(count)+'项待办'])
-                else:
-                    r = _sp.run(['python3',DEL,str(idx)], capture_output=True, text=True, timeout=10)
-                    reply = r.stdout.strip() or reply
-            elif a == 'query':
-                _sp.run(['python3',QR], capture_output=True, text=True, timeout=20)
-                todos = _j2.loads(open(TF).read()) if os.path.exists(TF) else []
-                active = [t for t in todos if not t.get('done') and not t.get('deleted')]
-                ls = ['待办('+str(len(active))+'项):'] if active else ['暂无待办']
-                for i,t in enumerate(active,1):
-                    m = ' [已提醒]' if t.get('notified') else ''
-                    ls.append(str(i)+'. '+t.get('text','')+m)
-                reply = chr(10).join(ls[:10])
-            print('[ACTION] '+a)
-
+        # 通过 ws_server 发送 todo 风格的大卡片
         self.reply_text = reply
         try:
             card_lines = [l.strip() for l in reply.split("\n") if l.strip()]
@@ -3987,7 +3934,7 @@ class WSServer:
             elif cmd_type == "voice_tts":
                 txt = cmd.get("text", "")
                 if txt:
-                    voice_mgr.tts(txt)
+                    threading.Thread(target=voice_mgr.tts, args=(txt,), daemon=True).start()
 
             elif cmd_type == "voice_inject":
                 # iter3 debug: 直接注入ASR文本, 跳过录音, 测试L3 intent
