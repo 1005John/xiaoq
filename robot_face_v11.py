@@ -3186,6 +3186,8 @@ class VoiceManager:
     def start_record(self):
         if self.proc:
             return
+        self._tts_stop = True
+        _subprocess.run(["pkill", "-f", "aplay.*tts_out"], capture_output=True, timeout=1)
         self.state = "listening"
         self.proc = _subprocess.Popen(
             ['arecord', '-D', 'plughw:CARD=seeed2micvoicec,DEV=0', '-f', 'S16_LE', '-r', '16000', '-c', '2', self.rec_file],
@@ -3297,12 +3299,10 @@ class VoiceManager:
         return ""
 
     def tts(self, text, voice="冰糖", on_start=None, on_end=None):
-        """MiMo-V2.5-TTS 流式 → PyAudio实时播放 (24kHz PCM16)"""
-        if not text:
-            return
+        """MiMo-V2.5-TTS -> WAV + aplay播放"""
+        if not text: return
         print(f"[TTS] MiMo-TTS: {text[:40]}...")
         if on_start: on_start()
-        # 停止录音释放设备
         if self.proc:
             self.proc.terminate()
             try: self.proc.wait(timeout=2)
@@ -3310,15 +3310,7 @@ class VoiceManager:
             self.proc = None
             time.sleep(0.3)
         try:
-            import urllib.request as _ur, base64 as _b64, json as _json
-            import pyaudio as _pa
-            import numpy as _np
-
-            _api_key = "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4"
-            _api_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
-
-            with open('/tmp/voice_debug.txt','a') as _f:
-                _f.write("tts: init MiMo-TTS...\n")
+            import urllib.request as _ur, base64 as _b64, json as _json, subprocess as _sp
 
             _body = _json.dumps({
                 "model": "mimo-v2.5-tts",
@@ -3330,66 +3322,41 @@ class VoiceManager:
                 "stream": True
             }, ensure_ascii=False).encode("utf-8")
 
-            _req = _ur.Request(_api_url, data=_body, headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "api-key": _api_key,
-            })
+            _req = _ur.Request(
+                "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+                data=_body,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "api-key": "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4",
+                }
+            )
 
-            _p = None; _stream = None
-            try:
-                _p = _pa.PyAudio()
-                _stream = _p.open(format=_pa.paInt16, channels=1, rate=44100,
-                                output=True, frames_per_buffer=2048)
-                _audio_buf = b""
-                _chunk_count = 0
-
-                with _ur.urlopen(_req, timeout=60) as _resp:
-                    for _line in _resp:
-                        _line = _line.decode("utf-8", errors="replace").strip()
-                        if not _line.startswith("data: "):
-                            continue
-                        _data_str = _line[6:]
-                        if _data_str == "[DONE]":
-                            break
-                        try:
-                            _chunk = _json.loads(_data_str)
-                            _choices = _chunk.get("choices", [])
-                            if not _choices:
-                                continue
-                            _audio = _choices[0].get("delta", {}).get("audio", {})
-                            if not _audio or "data" not in _audio:
-                                continue
-                            _pcm_bytes = _b64.b64decode(_audio["data"])
-                            _stream.write(_pcm_bytes)
-                            _audio_buf += _pcm_bytes
-                            _chunk_count += 1
-                        except Exception:
-                            pass
-
-                with open('/tmp/voice_debug.txt','a') as _f:
-                    _f.write(f"tts: complete, {_chunk_count} chunks, {len(_audio_buf)} bytes\n")
-            finally:
-                try:
-                    if _stream: _stream.stop_stream(); _stream.close()
-                except: pass
-                try:
-                    if _p: _p.terminate()
-                except: pass
+            _audio_buf = b""
+            with _ur.urlopen(_req, timeout=60) as _resp:
+                for _line in _resp:
+                    _line = _line.decode("utf-8", errors="replace").strip()
+                    if not _line.startswith("data: "): continue
+                    _ds = _line[6:]
+                    if _ds == "[DONE]": break
+                    try:
+                        _chunk = _json.loads(_ds)
+                        _audio = _chunk.get("choices",[{}])[0].get("delta",{}).get("audio",{})
+                        if _audio and "data" in _audio:
+                            _audio_buf += _b64.b64decode(_audio["data"])
+                    except: pass
 
             if _audio_buf:
                 import wave
                 with wave.open('/tmp/tts_out.wav', 'wb') as _wf:
                     _wf.setnchannels(1); _wf.setsampwidth(2)
-                    _wf.setframerate(44100)
+                    _wf.setframerate(24000)
                     _wf.writeframes(_audio_buf)
-                print(f"[TTS] Saved {len(_audio_buf)//1024}KB")
+                _sp.run(["aplay", "-q", "-D", "plughw:2,0", "/tmp/tts_out.wav"], timeout=30)
+                print(f"[TTS] Played {len(_audio_buf)//1024}KB")
 
         except Exception as e:
             print(f"[TTS] Error: {e}")
-            with open('/tmp/voice_debug.txt','a') as _f:
-                _f.write(f"TTS EXCEPTION: {e}\n")
-        if on_end:
-            on_end()
+        if on_end: on_end()
         print("[TTS] Done")
 
     def _call_llm_direct(self, prompt, is_context_prompt=False):
@@ -3435,7 +3402,7 @@ class VoiceManager:
                     "Content-Type": "application/json",
                     "Authorization": "Bearer " + _llm_api_key,
                 },
-                json={"messages": messages, "model": "mimo-v2.5", "max_tokens": 500},
+                json={"messages": messages, "model": "mimo-v2.5-pro", "max_tokens": 500},
                 timeout=60,
             )
             data = resp.json()
@@ -3732,8 +3699,8 @@ class VoiceManager:
         # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
             _body = _json.dumps({
-                "model": "mimo-v2.5",
-                "messages": [{"role": "user", "content": txt}],
+                "model": "mimo-v2.5-pro",
+                "messages": [{"role": "system", "content": "你是小Q桌面助手。涉及待办操作时回复末尾必须包含JSON: {\"action\":\"add\",\"text\":\"用户原话\"} {\"action\":\"query\"} {\"action\":\"done\",\"index\":N} {\"action\":\"delete\",\"index\":\"all\"}。必须包含。"}, {"role": "user", "content": txt}],
                 "max_tokens": 500,
             }, ensure_ascii=False).encode("utf-8")
             _req = _ur.Request(
@@ -3774,7 +3741,54 @@ class VoiceManager:
             except Exception as e:
                 reply = f"Hermes 启动失败: {e}"
                 print(f"[HERMES] Error: {e}")
-        # 通过 ws_server 发送 todo 风格的大卡片
+        # JSON指令解析
+        import subprocess as _sp, json as _j2, re as _re2
+        _act = None
+        _m = _re2.search(r'\{"action"\s*:\s*"(\w+)"[^}]*\}', reply)
+        if _m:
+            try:
+                _act = _j2.loads(_m.group(0))
+                reply = reply.replace(_m.group(0), '').strip()
+            except: pass
+        if _act:
+            a = _act.get('action','')
+            ADD = os.path.expanduser('~/.hermes/skills/pi-todo/add.py')
+            DON = os.path.expanduser('~/.hermes/skills/pi-todo/done.py')
+            DEL = os.path.expanduser('~/.hermes/skills/pi-todo/delete.py')
+            QR  = os.path.expanduser('~/.hermes/skills/pi-todo/query.py')
+            TF  = os.path.expanduser('~/Little_Q_new/pi_reference_exp/data/todos.json')
+            if a == 'add':
+                t = _act.get('text','')
+                if t:
+                    r = _sp.run(['python3',ADD,t], capture_output=True, text=True, timeout=10)
+                    reply = r.stdout.strip() or reply
+            elif a == 'done':
+                r = _sp.run(['python3',DON,str(_act.get('index',1))], capture_output=True, text=True, timeout=10)
+                reply = r.stdout.strip() or reply
+            elif a == 'delete':
+                idx = _act.get('index',1)
+                if str(idx) == 'all':
+                    todos = _j2.loads(open(TF).read()) if os.path.exists(TF) else []
+                    count = 0
+                    for t in todos:
+                        if not t.get('done') and not t.get('deleted'):
+                            t['done'] = True; t['deleted'] = True; count += 1
+                    _j2.dump(todos, open(TF,'w'), ensure_ascii=False, indent=2)
+                    reply = chr(10).join(['已删除'+str(count)+'项待办'])
+                else:
+                    r = _sp.run(['python3',DEL,str(idx)], capture_output=True, text=True, timeout=10)
+                    reply = r.stdout.strip() or reply
+            elif a == 'query':
+                _sp.run(['python3',QR], capture_output=True, text=True, timeout=20)
+                todos = _j2.loads(open(TF).read()) if os.path.exists(TF) else []
+                active = [t for t in todos if not t.get('done') and not t.get('deleted')]
+                ls = ['待办('+str(len(active))+'项):'] if active else ['暂无待办']
+                for i,t in enumerate(active,1):
+                    m = ' [已提醒]' if t.get('notified') else ''
+                    ls.append(str(i)+'. '+t.get('text','')+m)
+                reply = chr(10).join(ls[:10])
+            print('[ACTION] '+a)
+
         self.reply_text = reply
         try:
             card_lines = [l.strip() for l in reply.split("\n") if l.strip()]
@@ -3934,7 +3948,7 @@ class WSServer:
             elif cmd_type == "voice_tts":
                 txt = cmd.get("text", "")
                 if txt:
-                    threading.Thread(target=voice_mgr.tts, args=(txt,), daemon=True).start()
+                    voice_mgr.tts(txt)
 
             elif cmd_type == "voice_inject":
                 # iter3 debug: 直接注入ASR文本, 跳过录音, 测试L3 intent

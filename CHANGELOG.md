@@ -1,5 +1,19 @@
 # 变更日志
 
+## [v1.3.1] - 2026-06-07
+
+### 🔧 TTS 修复
+- **去掉 PyAudio**：声卡重启后不支持 24000/44100Hz
+- **改用 aplay + plughw**：保存 24000Hz WAV，aplay -D plughw:2,0 自动转码
+- **按空格停止 TTS**：start_record 时 kill aplay 进程
+
+### 📦 清理
+- 删除本地人脸识别模型文件（YOLO/Haar/SSD/MediaPipe）
+- 释放 ~200MB 磁盘空间
+- 恢复干净 robot_face（去除 face_tracker/face_search/baidu_face 引用）
+
+---
+
 ## [v1.3.0] - 2026-06-06
 
 ### 🧠 模型升级
