@@ -339,9 +339,8 @@ EXPRESSIONS = {
         "tail_target": IDLE_P, "tail_speed": 0.06,
     },
     "sleepy": {
-        "intro_target": SLEEPY, "intro_speed": 0.04,
-        "loop_target": SLEEPY, "loop_duration": 99.0,
-        "tail_target": SURPRISE, "tail_speed": 0.25,
+        "intro_target": SLEEPY, "intro_speed": 30,
+        "loop_target": SLEEPY, "loop_duration": 999999.0,
     },
     "bored": {
         "intro_target": BORED, "intro_speed": 0.08,
@@ -2978,7 +2977,10 @@ class CardManager:
         self.scroll_y = 0.0
         self.scroll_timer = 0.0
         self._cached_card = None  # 清除卡片缓存
-        self._wrapped_lines = None   # 重置换行缓存
+        self._wrapped_lines = None
+        self._display_timer = 0.0
+        self._scroll_done_timer = 0.0
+        self._close_timer = 0.0    # 重置自动关闭计时器
         if card_type == "todo":
             # todo: 脸缩小并随机偏移 + 眼距缩小
             self.target_scale = 0.35
@@ -3016,6 +3018,19 @@ class CardManager:
         self.face_offset_x += (self.target_offset_x - self.face_offset_x) * speed
         self.face_offset_y += (self.target_offset_y - self.face_offset_y) * speed
         self.spacing_scale += (self.target_spacing - self.spacing_scale) * speed
+        # ── 自动关闭 ──
+        if self.visible:
+            has_scroll = self.max_scroll > 0
+            try:
+                if voice_mgr.state == "speaking": self._tts_was_active = True
+                elif getattr(self, "_tts_was_active", False):
+                    self._display_timer += dt
+                    if self._display_timer >= 5.0:
+                        self.hide()
+                        self._tts_was_active = False
+            except: pass
+            if has_scroll:
+                pass
         # ── 垂直滚动 (todo卡片) ──
         if self.card_type == "todo" and self.visible and self.lines:
             cw, ch = 910, 500
@@ -3029,7 +3044,10 @@ class CardManager:
                 else:
                     self.scroll_y += 20 * dt  # 20 px/s 缓慢上滚
                     if self.scroll_y >= self.max_scroll:
-                        self.scroll_y = self.max_scroll  # 到底停止
+                        self.scroll_y = self.max_scroll
+                        self._scroll_done_timer += dt
+                        if self._scroll_done_timer >= 5.0:
+                            self.hide()
 
 
 
@@ -4319,7 +4337,7 @@ while running:
 
     _sleep_timer += dt
     if voice_mgr.state != "idle": _sleep_timer = 0
-    if _sleep_timer > 300 and not _is_sleeping:
+    if _sleep_timer > 120 and not _is_sleeping:
         _is_sleeping = True
         if gimbal_ctrl is not None: gimbal_ctrl.move_to(90, 162, 500, blocking=False)
         sm.trigger("sleepy")
@@ -4366,7 +4384,7 @@ while running:
         if _is_sleeping: npc_sm._set_state(NPCState.SLEEP)
         else: npc_sm.update(dt)
     elif sm.auto_mode:
-        sm.update_auto(dt)
+        if not _is_sleeping: sm.update_auto(dt)
     sm.update(dt)
     vfx_mgr.update(dt)  # v6: 更新特效
     squash_stretch.update(dt)  # v7: 更新Squash&Stretch
@@ -4420,7 +4438,7 @@ while running:
     _vlines = [f"🎤 {_vs_display} | 表情:{sm.active_expr}"]
     _sleep_timer += dt
     if voice_mgr.state != "idle": _sleep_timer = 0
-    if _sleep_timer > 300 and not _is_sleeping:
+    if _sleep_timer > 120 and not _is_sleeping:
         _is_sleeping = True
         if gimbal_ctrl is not None: gimbal_ctrl.move_to(90, 162, 500, blocking=False)
         sm.trigger("sleepy")
