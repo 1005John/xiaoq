@@ -133,7 +133,7 @@ class StyleConfig:
         return cls.EXPR_NEON_MAP.get(expr_name, cls.NEON_DEFAULT)
 
     @classmethod
-    def dim_color(cls, color, factor=0.3):
+    def dim_color(cls, color, factor=30):
         """调暗霓虹色(用于发光外圈)"""
         return tuple(max(0, min(255, int(c * factor))) for c in color[:3])
 
@@ -239,7 +239,7 @@ class Personality:
     @classmethod
     def gentle(cls):
         """温柔陪伴型"""
-        return cls(activity_level=0.4, initiative_level=0.3, empathy_level=0.8,
+        return cls(activity_level=0.4, initiative_level=30, empathy_level=0.8,
                    expressiveness=0.5, patience_level=1.2, talkativeness=0.4)
 
     @classmethod
@@ -266,15 +266,16 @@ class NPCState(enum.Enum):
 # P(l_open, r_open, l_w, r_w, l_y, r_y, l_cut, r_cut, pupil_scale, highlight, brow_l, brow_r, blush)
 HAPPY      = P(1.0, 1.0, 1.1, 1.1, -5, -5, 0.55, 0.55,  1.2, 0.9, -3, -3, 0.5)    # 瞳孔放大+高光强+眉上扬+腮红
 LAUGH      = P(1.0, 1.0, 1.2, 1.2, -8, -8, 0.65, 0.65,  1.3, 1.0, -5, -5, 0.7)    # 大瞳孔+强光+眉高扬+强腮红
-EXCITED    = P(1.3, 1.3, 1.0, 1.0, -5, -5, 0, 0,          1.4, 1.0, -4, -4, 0.3)   # 最大瞳孔+强光
-ANGRY      = P(0.7, 0.7, 1.2, 1.2, 8, 8, 0, 0,            0.6, 0.3, 8, 8, 0)       # 小瞳孔+弱光+眉下压
+EXCITED    = P(1.3, 1.3, 1.0, 1.0, -5, -5, 0, 0,          1.4, 1.0, -4, -4, 30)   # 最大瞳孔+强光
+ANGRY      = P(0.7, 0.7, 1.2, 1.2, 8, 8, 0, 0,            0.6, 30, 8, 8, 0)       # 小瞳孔+弱光+眉下压
 SURPRISE   = P(1.5, 1.5, 1.1, 1.1, -10, -10, 0, 0,        0.5, 0.95, -8, -8, 0)    # 小瞳孔+强光分裂+眉高耸
 SCARED     = P(1.3, 1.0, 0.9, 1.3, -8, -5, 0, 0,          0.7, 0.4, -5, 5, 0)      # 中瞳孔+弱光+不对称眉
-SMILE      = P(0.85, 0.85, 1.0, 1.0, 0, 0, 0.25, 0.25,    1.1, 0.8, -1, -1, 0.3)   # 轻度瞳孔+腮红
+SMILE      = P(0.85, 0.85, 1.0, 1.0, 0, 0, 0.25, 0.25,    1.1, 0.8, -1, -1, 30)   # 轻度瞳孔+腮红
 RELAXED    = P(0.8, 0.8, 1.0, 1.0, 0, 0, 0, 0,            0.9, 0.5, 0, 0, 0)       # 中瞳孔+柔光
-SAD        = P(0.5, 0.5, 1.0, 1.0, 5, 5, 0, 0,            0.7, 0.3, 5, 5, 0)       # 小瞳孔+弱光+眉下垂
-SLEEPY     = P(0.15, 0.15, 1.0, 1.0, 0, 0, 0, 0,          0.5, 0.15, 2, 2, 0)      # 极小瞳孔+极弱光+眉松
-BORED      = P(0.4, 0.6, 1.0, 0.8, 3, 0, 0, 0,            0.8, 0.3, 3, -1, 0)      # 中瞳孔+弱光+不对称
+SAD        = P(0.5, 0.5, 1.0, 1.0, 5, 5, 0, 0,            0.7, 30, 5, 5, 0)       # 小瞳孔+弱光+眉下垂
+SLEEPY     = P(0.0, 0.0, 0.8, 0.8, 0, 0, 0, 0,            1.0, 0.1, 0, 0, 0)
+DEEP_SLEEP  = P(0.0, 0.0, 0.8, 0.8, 0, 0, 0, 0,           1.0, 0.0, 0, 0, 0)      # 极小瞳孔+极弱光+眉松
+BORED      = P(0.4, 0.6, 1.0, 0.8, 3, 0, 0, 0,            0.8, 30, 3, -1, 0)      # 中瞳孔+弱光+不对称
 IDLE_P     = P(1.0, 1.0, 1.0, 1.0, 0, 0, 0, 0,            1.0, 0.7, 0, 0, 0)       # 标准瞳孔+标准光
 CURIOUS    = P(1.2, 0.8, 1.1, 0.9, -5, 2, 0, 0,           1.3, 0.8, -3, 2, 0)      # 大瞳孔+中光+好奇眉
 THINK      = P(0.8, 0.5, 0.9, 0.7, -2, 3, 0, 0,           0.8, 0.4, 2, 6, 0)       # 中瞳孔+弱光+思考眉
@@ -287,7 +288,7 @@ LOOK_U     = P(1.1, 1.1, 0.9, 0.9, -10, -10, 0, 0,        1.0, 0.7, -2, -2, 0)
 
 # 瞳孔特殊形态预设
 HEART_EYES = P(1.2, 1.2, 1.1, 1.1, -5, -5, 0.4, 0.4,     1.0, 0.9, -3, -3, 0.8)   # 爱心瞳孔
-STAR_EYES  = P(1.3, 1.3, 1.0, 1.0, -5, -5, 0, 0,          1.0, 1.0, -4, -4, 0.3)   # 星星瞳孔
+STAR_EYES  = P(1.3, 1.3, 1.0, 1.0, -5, -5, 0, 0,          1.0, 1.0, -4, -4, 30)   # 星星瞳孔
 
 # ── 分段动画定义 ──
 EXPRESSIONS = {
@@ -339,8 +340,7 @@ EXPRESSIONS = {
     },
     "sleepy": {
         "intro_target": SLEEPY, "intro_speed": 0.04,
-        "loop_target": SLEEPY, "loop_duration": 8.0,
-        "loop_dynamic": True,
+        "loop_target": SLEEPY, "loop_duration": 99.0,
         "tail_target": SURPRISE, "tail_speed": 0.25,
     },
     "bored": {
@@ -490,7 +490,7 @@ class StateMachine:
         if self.gimbal is None:
             return
         try:
-            if _face_search_active:
+            if _face_search_active or _is_sleeping:
                 return
         except: pass
         mapping = EXPRESSION_GIMBAL.get(expr_name)
@@ -3884,7 +3884,7 @@ class WSServer:
                 sm.auto_mode = cmd.get("enabled", True)
             elif cmd_type == "set_state":
                 state = cmd.get("state", "idle")
-                if npc_sm and npc_enabled:
+                if npc_sm and npc_enabled and not _is_sleeping:
                     npc_mapping = {
                         "idle": "idle", "observe": "observe",
                         "engaged": "engaged", "warn": "warn", "sleep": "sleep",
@@ -3910,7 +3910,7 @@ class WSServer:
                     }
                     if not _face_search_active: sm.trigger(voice_fallback.get(state, "idle"))
             elif cmd_type == "npc_interact":
-                if npc_sm and npc_enabled:
+                if npc_sm and npc_enabled and not _is_sleeping:
                     npc_sm.interact(cmd.get("interaction", "touch"))
             # ── v6新增指令 ──
             elif cmd_type == "trigger_vfx":
@@ -4136,6 +4136,8 @@ fps_count = 0
 _actual_fps = 60.0  # v9: perf monitor用
 _face_search = None
 _face_search_active = False
+_sleep_timer = 0
+_is_sleeping = False
 while running:
     dt = clock.tick(FPS) / 1000.0
     fps_count += 1
@@ -4170,6 +4172,9 @@ while running:
             elif event.key == pygame.K_SPACE:
                 voice_mgr.start_record()
                 card_mgr.hide()
+                _sleep_timer = 0
+                _is_sleeping = False
+                if npc_sm: npc_sm._set_state(NPCState.IDLE)
                 if gimbal_ctrl is not None and not _face_search_active:
                     _face_search_active = True
                     gimbal_ctrl.move_to(90, 148, 400, blocking=True)
@@ -4233,7 +4238,7 @@ while running:
                 sm.trigger("speaking")
                 if npc_sm: npc_sm.idle_time = 0
             elif event.key == pygame.K_5:
-                sm.trigger("sleepy")
+                sm.trigger("deep_sleep")
                 if npc_sm: npc_sm.idle_time = 0
             elif event.key == pygame.K_6:
                 sm.trigger("curious")
@@ -4312,6 +4317,17 @@ while running:
 
                 sm.interact_cooldown = random.uniform(2, 3)
 
+    _sleep_timer += dt
+    if voice_mgr.state != "idle": _sleep_timer = 0
+    if _sleep_timer > 300 and not _is_sleeping:
+        _is_sleeping = True
+        if gimbal_ctrl is not None: gimbal_ctrl.move_to(90, 162, 500, blocking=False)
+        sm.trigger("sleepy")
+        if npc_sm: npc_sm._set_state(NPCState.SLEEP)
+        if npc_sm: npc_sm._set_state(NPCState.SLEEP)
+    if _is_sleeping and voice_mgr.state != "idle":
+        _is_sleeping = False
+        _sleep_timer = 0
     if _face_search_active and _face_search is not None:
         if voice_mgr.state in ("listening", "thinking", "speaking"):
             if _face_search.face_detected:
@@ -4347,7 +4363,8 @@ while running:
 
     card_mgr.update(dt)
     if npc_enabled and npc_sm:
-        npc_sm.update(dt)
+        if _is_sleeping: npc_sm._set_state(NPCState.SLEEP)
+        else: npc_sm.update(dt)
     elif sm.auto_mode:
         sm.update_auto(dt)
     sm.update(dt)
@@ -4399,7 +4416,19 @@ while running:
     # 语音状态叠加层(永久显示)
     _vs = voice_mgr.state
     _vcolor = (150, 150, 150)
-    _vlines = [f"🎤 {_vs.upper()} | 表情:{sm.active_expr}"]
+    _vs_display = "SLEEP" if _is_sleeping else _vs.upper()
+    _vlines = [f"🎤 {_vs_display} | 表情:{sm.active_expr}"]
+    _sleep_timer += dt
+    if voice_mgr.state != "idle": _sleep_timer = 0
+    if _sleep_timer > 300 and not _is_sleeping:
+        _is_sleeping = True
+        if gimbal_ctrl is not None: gimbal_ctrl.move_to(90, 162, 500, blocking=False)
+        sm.trigger("sleepy")
+        if npc_sm: npc_sm._set_state(NPCState.SLEEP)
+        if npc_sm: npc_sm._set_state(NPCState.SLEEP)
+    if _is_sleeping and voice_mgr.state != "idle":
+        _is_sleeping = False
+        _sleep_timer = 0
     if _face_search_active and _face_search is not None:
         fd = _face_search.face_detected
         fp = _face_search.face_pan
