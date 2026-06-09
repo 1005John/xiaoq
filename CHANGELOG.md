@@ -1,5 +1,22 @@
 # 变更日志
 
+## [v1.5.2] - 2026-06-09
+
+### 🚀 Hailo-8L 端侧人脸检测 + Pan/Tilt 双轴追踪
+- **hailo_face_pipeline.py**：复用 hailo-apps INFERENCE_PIPELINE_WRAPPER，
+  SCRFD 2.5G 1280x720，10fps + nice 12 控 CPU，fakesink 无显示
+- **hailo_face.py**：与 BaiduFace 相同接口，渐进追踪 pan + tilt
+- **替换百度云**：robot_face_v11.py import 改为 HailoFace，接口不变
+- 按空格启动，屏幕显示 `👁 Pxx Txx`
+
+### ⚡ 性能
+- 人脸追踪中 CPU ~64%，内存 ~400MB
+- 30fps 渲染目标（PerfMonitor 自适应降级）
+
+### 🐛 修复
+- 麦克风占用（残留 arecord 进程）
+- _face_to_angles 缺少 return 语句
+
 ## [v1.4.2] - 2026-06-07
 
 ### 人脸追踪优化

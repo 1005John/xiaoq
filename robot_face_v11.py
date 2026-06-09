@@ -22,7 +22,7 @@ import websockets
 import wave, struct, subprocess as _subprocess
 import socket
 from gimbal_driver import GimbalController
-from baidu_face import BaiduFace
+from hailo_face import HailoFace
 from skills.data_collector import DataCollector
 from skills.name_corrector import correct
 import dashscope
@@ -40,7 +40,7 @@ log = logging.getLogger("v10")
 
 # ── 配置 ──
 WIDTH, HEIGHT = 1280, 720
-FPS = 60
+FPS = 30
 CARD_WIDTH = WIDTH // 2  # 640
 
 # ═══════════════════════════════════════════════════════
@@ -4195,8 +4195,7 @@ while running:
                 if npc_sm: npc_sm._set_state(NPCState.IDLE)
                 if gimbal_ctrl is not None and not _face_search_active:
                     _face_search_active = True
-                    gimbal_ctrl.move_to(90, 148, 400, blocking=True)
-                    _face_search = BaiduFace(gimbal_ctrl)
+                    _face_search = HailoFace(gimbal_ctrl)
                     _face_search.start()
                 print("[Voice] Push-to-talk: 开始录音")
             elif event.key == pygame.K_n:
@@ -4349,7 +4348,7 @@ while running:
     if _face_search_active and _face_search is not None:
         if voice_mgr.state in ("listening", "thinking", "speaking"):
             if _face_search.face_detected:
-                gimbal_ctrl.move_to(_face_search.face_pan, 148, 200, blocking=False)
+                gimbal_ctrl.move_to(_face_search.face_pan, _face_search.face_tilt, 200, blocking=False)
         else:
             _face_search.stop()
             _face_search = None
@@ -4450,7 +4449,8 @@ while running:
     if _face_search_active and _face_search is not None:
         fd = _face_search.face_detected
         fp = _face_search.face_pan
-        st = f'👁 pan={fp:.0f}' if fd else '🔍 扫描中...'
+        ft = _face_search.face_tilt
+        st = f'👁 P{fp:.0f} T{ft:.0f}' if fd else '🔍 扫描中...'
         _vlines[0] += f' | {st}' 
     if _vs == "listening":
         _vcolor = (100, 200, 255)
