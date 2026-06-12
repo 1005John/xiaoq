@@ -832,7 +832,7 @@ class CuteRenderer:
         # 眼睛尺寸
         self.eye_rx = 112           # 眼 X 半径
         self.eye_ry = 140           # 眼 Y 半径
-        self.eye_spacing = 224      # 眼间距
+        self.eye_spacing = 250      # 眼间距
         self.eye_y_offset = -42     # 眼睛 Y 偏移
         # 眉毛
         self.brow_y_offset = -196   # 眉基 Y 偏移
@@ -965,7 +965,10 @@ class CuteRenderer:
             self._draw_star_eye(px, py, bw, bh, cut_pixels, hl, face_scale)
             return
 
-        # 正椭圆眼球
+        # 眼白(外层，比黑眼球大一圈)
+        ww = int(bw * 1.2); wh = int(bh * 1.2)
+        pygame.draw.ellipse(self.screen, (250, 250, 250), (px - ww, py - wh, ww * 2, wh * 2))
+        # 正椭圆黑眼球
         pygame.draw.ellipse(self.screen, eye_color, (px - bw, py - bh, bw * 2, bh * 2))
 
         # 月牙眼裁剪
