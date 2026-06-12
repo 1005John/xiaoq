@@ -830,12 +830,12 @@ class CuteRenderer:
         self.face_center_x = WIDTH // 2
         self.face_center_y = HEIGHT // 2 + 20
         # 眼睛尺寸
-        self.eye_rx = 112           # 眼 X 半径
-        self.eye_ry = 140           # 眼 Y 半径
+        self.eye_rx = 90            # 眼 X 半径(小黑眼球)
+        self.eye_ry = 112           # 眼 Y 半径
         self.eye_spacing = 250      # 眼间距
         self.eye_y_offset = -42     # 眼睛 Y 偏移
         # 眉毛
-        self.brow_y_offset = -196   # 眉基 Y 偏移
+        self.brow_y_offset = -240   # 眉基 Y 偏移(更高)
 
         self.pupil_mode = "normal"
         self._pupil_mode_timer = 0.0
@@ -966,15 +966,17 @@ class CuteRenderer:
             return
 
         # 眼白(外层，比黑眼球大一圈)
-        ww = int(bw * 1.2); wh = int(bh * 1.2)
+        ww = int(bw * 1.6); wh = int(bh * 1.6)
         pygame.draw.ellipse(self.screen, (250, 250, 250), (px - ww, py - wh, ww * 2, wh * 2))
         # 正椭圆黑眼球
         pygame.draw.ellipse(self.screen, eye_color, (px - bw, py - bh, bw * 2, bh * 2))
 
-        # 月牙眼裁剪
+        # 月牙眼裁剪(覆盖眼白区域)
         if cut_pixels > 0:
             bg = CuteStyle.BG_COLOR
-            clip_rect = (px - bw - 2, py + bh - cut_pixels, bw * 2 + 4, cut_pixels + 4)
+            clip_h = cut_pixels + (wh - bh)  # 额外覆盖眼白超出部分
+            clip_y = py + bh - cut_pixels - (wh - bh)
+            clip_rect = (px - ww - 2, clip_y, ww * 2 + 4, clip_h + 4)
             pygame.draw.rect(self.screen, bg, clip_rect)
             arc_pts = [(px - bw + int(bw * 2 * (i / 20.0)),
                        py + bh - cut_pixels + int(math.sin((i / 20.0) * math.pi) * 3))
