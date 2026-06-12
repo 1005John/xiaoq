@@ -47,7 +47,7 @@ class CuteStyle:
     MOUTH_INNER   = (220, 130, 125)  # 嘴唇内侧(开口时)
 
     # ── 腮红 ──
-    BLUSH_COLOR   = (240, 130, 125)  # 红润腮红
+    BLUSH_COLOR   = (235, 105, 100)  # 更红腮红
 
     # ── 情绪色调(用于氛围) ──
     MOOD_GLOW = {
@@ -941,8 +941,8 @@ class CuteRenderer:
         px = cx + px_shift
         py = cy
 
-        if bh < 5:
-            # 闭眼/困倦 — 细弧线，无高光
+        if bh < 10:
+            # 困倦/闭眼 — 细弧线，无眼白无高光
             lw = max(6, int(14 * face_scale))
             pts = [(cx - bw + int(bw * 2 * (i / 11.0)),
                     cy + int(math.sin((i / 11.0) * math.pi) * 2))
@@ -971,17 +971,18 @@ class CuteRenderer:
         # 正椭圆黑眼球
         pygame.draw.ellipse(self.screen, eye_color, (px - bw, py - bh, bw * 2, bh * 2))
 
-        # 月牙眼裁剪(覆盖眼白区域)
+        # 月牙眼: 用背景色覆盖下眼睑，只留上弧线
         if cut_pixels > 0:
             bg = CuteStyle.BG_COLOR
-            clip_h = cut_pixels + (wh - bh)  # 额外覆盖眼白超出部分
-            clip_y = py + bh - cut_pixels - (wh - bh)
-            clip_rect = (px - ww - 2, clip_y, ww * 2 + 4, clip_h + 4)
-            pygame.draw.rect(self.screen, bg, clip_rect)
+            # 从裁剪起点往下覆盖到眼白底部之外
+            clip_y = py + bh - cut_pixels
+            clip_h = wh + cut_pixels + 8
+            pygame.draw.rect(self.screen, bg, (px - ww - 4, clip_y, ww * 2 + 8, clip_h))
+            # 重画月牙下弧
             arc_pts = [(px - bw + int(bw * 2 * (i / 20.0)),
-                       py + bh - cut_pixels + int(math.sin((i / 20.0) * math.pi) * 3))
+                       clip_y + int(math.sin((i / 20.0) * math.pi) * 4))
                       for i in range(21)]
-            pygame.draw.lines(self.screen, eye_color, False, arc_pts, 2)
+            pygame.draw.lines(self.screen, eye_color, False, arc_pts, 3)
 
         # 高光点(左上角)
         if open_r > 0.05 and hl > 0.05:
