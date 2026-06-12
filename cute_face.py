@@ -829,13 +829,13 @@ class CuteRenderer:
         self.screen = screen
         self.face_center_x = WIDTH // 2
         self.face_center_y = HEIGHT // 2 + 20
-        # 眼睛尺寸 (大眼，与霓虹版本比例一致)
-        self.eye_rx = 160           # 眼 X 半径
-        self.eye_ry = 200           # 眼 Y 半径
-        self.eye_spacing = 320      # 眼间距(中心到中心 X 偏移)
-        self.eye_y_offset = -60     # 眼睛 Y 偏移(相对 face_center)
+        # 眼睛尺寸
+        self.eye_rx = 112           # 眼 X 半径
+        self.eye_ry = 140           # 眼 Y 半径
+        self.eye_spacing = 224      # 眼间距
+        self.eye_y_offset = -42     # 眼睛 Y 偏移
         # 眉毛
-        self.brow_y_offset = -280   # 眉基 Y 偏移(远离眼球)
+        self.brow_y_offset = -196   # 眉基 Y 偏移
 
         self.pupil_mode = "normal"
         self._pupil_mode_timer = 0.0
@@ -923,9 +923,9 @@ class CuteRenderer:
         alpha = int(min(140, blush_val * 180))
         if alpha < 5: return
         for side in [-1, 1]:
-            bx = cx + side * (self.eye_spacing + 290) * scale
-            by = cy + (self.eye_y_offset + 280) * scale
-            brx = int(130 * scale); bry = int(75 * scale)
+            bx = cx + side * (self.eye_spacing + 203) * scale
+            by = cy + (self.eye_y_offset + 196) * scale
+            brx = int(91 * scale); bry = int(52 * scale)
             surf = pygame.Surface((brx * 2 + 8, bry * 2 + 8), pygame.SRCALPHA)
             pygame.draw.ellipse(surf, (*CuteStyle.BLUSH_COLOR, alpha),
                               (4, 4, brx * 2, bry * 2))
@@ -943,7 +943,7 @@ class CuteRenderer:
 
         if bh < 5:
             # 闭眼/困倦 — 细弧线，无高光
-            lw = max(8, int(20 * face_scale))
+            lw = max(6, int(14 * face_scale))
             pts = [(cx - bw + int(bw * 2 * (i / 11.0)),
                     cy + int(math.sin((i / 11.0) * math.pi) * 2))
                    for i in range(12)]
@@ -980,7 +980,7 @@ class CuteRenderer:
 
         # 高光点(左上角)
         if open_r > 0.05 and hl > 0.05:
-            hr = max(14, int(45 * hl * face_scale))
+            hr = max(10, int(31 * hl * face_scale))
             hx = px - int(bw * 0.38)
             hy = py - int(bh * 0.40)
             pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (hx, hy), hr)
@@ -1003,7 +1003,7 @@ class CuteRenderer:
         pygame.draw.polygon(surf, color, pts)
         # 高光(左上角)
         if hl > 0.05:
-            hr = max(10, int(30 * hl * face_scale))
+            hr = max(7, int(21 * hl * face_scale))
             hx = cs_x - int(size * 0.30)
             hy = cs_y - int(size * 0.28)
             pygame.draw.circle(surf, CuteStyle.PUPIL_HIGHLIGHT, (hx, hy), hr)
@@ -1021,7 +1021,7 @@ class CuteRenderer:
         if len(points) >= 3:
             pygame.draw.polygon(self.screen, CuteStyle.PUPIL_COLOR, points)
             if hl > 0.05:
-                hr = max(8, int(25 * hl * face_scale))
+                hr = max(6, int(17 * hl * face_scale))
                 hx = cx - int(size * 0.30)
                 hy = cy - int(size * 0.28)
                 pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (hx, hy), hr)
@@ -1030,19 +1030,19 @@ class CuteRenderer:
     def _draw_eyebrow(self, cx, cy, brow_offset, face_scale, side):
         """渐细圆润眉毛：重叠圆点串，外粗→内细。
         左边: 左上↘右下  右边: 右上↙左下"""
-        blen = int(260 * face_scale)
-        thick_outer = max(14, int(24 * face_scale))
-        thick_inner = max(4, int(9 * face_scale))
+        blen = int(182 * face_scale)
+        thick_outer = max(10, int(17 * face_scale))
+        thick_inner = max(3, int(6 * face_scale))
 
         tilt = brow_offset * face_scale * 1.5
         half = blen // 2
 
         if side < 0:
-            x1, y1 = cx - half, cy - int(40 * face_scale) + tilt
-            x2, y2 = cx + half, cy + int(10 * face_scale) - tilt * 0.5
+            x1, y1 = cx - half, cy - int(28 * face_scale) + tilt
+            x2, y2 = cx + half, cy + int(7 * face_scale) - tilt * 0.5
         else:
-            x1, y1 = cx + half, cy - int(40 * face_scale) + tilt
-            x2, y2 = cx - half, cy + int(10 * face_scale) - tilt * 0.5
+            x1, y1 = cx + half, cy - int(28 * face_scale) + tilt
+            x2, y2 = cx - half, cy + int(7 * face_scale) - tilt * 0.5
 
         # 圆点串画眉毛 — 天然圆润，4层渐透柔化
         margin = int(thick_outer + 5)
@@ -1083,7 +1083,7 @@ class CuteRenderer:
 def main():
     pygame.init()
     pygame.freetype.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
     pygame.display.set_caption("小Q — 可爱自信风 | 1-9表情 M氛围 B弹性 F1调试 ESC退出")
     clock = pygame.time.Clock()
 
