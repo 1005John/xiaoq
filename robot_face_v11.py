@@ -220,6 +220,35 @@ class Params:
 
 P = Params
 
+# ═══ CuteStyle — 可爱风配色系统 ═══
+class CuteStyle:
+    """可爱自信风全局配色"""
+    BG_COLOR = (240, 208, 192)
+    BG_WARM = (245, 218, 202)
+    FACE_SKIN = (255, 228, 196)
+    FACE_SHADOW = (245, 210, 180)
+    EYE_WHITE = (255, 255, 255, 230)
+    EYE_OUTLINE = (80, 70, 65)
+    PUPIL_COLOR = (25, 22, 20)
+    PUPIL_HIGHLIGHT = (255, 255, 255)
+    BROW_COLOR = (55, 48, 42)
+    MOUTH_COLOR = (195, 105, 100)
+    MOUTH_INNER = (220, 130, 125)
+    BLUSH_COLOR = (235, 105, 100)
+    MOOD_GLOW = {
+        "idle": (255, 240, 220), "happy": (255, 220, 180),
+        "love": (255, 190, 200), "sad": (200, 210, 240),
+        "angry": (255, 200, 190), "surprised": (255, 235, 170),
+        "excited": (255, 210, 140), "curious": (240, 225, 200),
+        "sleepy": (220, 215, 230), "focus": (230, 225, 215),
+    }
+    PARTICLE_COLORS = {
+        "heart": [(255, 120, 150), (255, 160, 180), (255, 100, 140)],
+        "star": [(255, 210, 80), (255, 230, 130), (255, 190, 60)],
+        "sparkle": [(255, 240, 180), (255, 220, 200), (255, 200, 220)],
+    }
+
+
 
 # ═══ 人格参数系统 ═══
 class Personality:
@@ -439,12 +468,108 @@ EXPRESSION_GIMBAL = {
 }
 
 
+
+
+# ═══ 可爱风表情参数预设 ═══
+CUTE_IDLE_P     = P(0.90, 0.90, 1.00, 1.00,  0,  0, 0.00, 0.00, 1.00, 0.80, -2, -2, 0.55)
+
+CUTE_HAPPY      = P(1.05, 1.05, 1.12, 1.12, -3, -3, 0.20, 0.20, 1.20, 1.00, -8, -8, 0.75)
+CUTE_LAUGH      = P(0.40, 0.40, 1.15, 1.15,  0,  0, 0.75, 0.75, 1.10, 0.90, -9, -9, 0.55)
+CUTE_EXCITED    = P(1.20, 1.20, 1.20, 1.20, -5, -5, 0.00, 0.00, 1.40, 1.00, -10, -10, 0.55)
+CUTE_SMILE      = P(0.70, 0.70, 1.08, 1.08,  0,  0, 0.50, 0.50, 1.15, 0.85, -5, -5, 0.55)
+CUTE_RELAXED    = P(0.65, 0.65, 1.00, 1.00,  0,  0, 0.00, 0.00, 0.90, 0.50,  0,  0, 0.55)
+CUTE_ANGRY      = P(0.60, 0.60, 0.90, 0.90,  4,  4, 0.00, 0.00, 0.60, 0.30,  6,  6, 0.55)
+CUTE_SAD        = P(0.45, 0.45, 0.95, 0.95,  5,  5, 0.00, 0.00, 0.70, 0.30, 10, 10, 0.00)
+CUTE_SCARED     = P(1.30, 0.90, 0.95, 1.20, -7, -3, 0.00, 0.00, 0.60, 0.40, -5,  7, 0.55)
+CUTE_SLEEPY     = P(0.08, 0.08, 0.85, 0.85,  0,  0, 0.00, 0.00, 1.00, 0.05,  2,  2, 0.00)
+CUTE_DEEP_SLEEP = P(0.00, 0.00, 0.85, 0.85,  0,  0, 0.00, 0.00, 1.00, 0.00,  2,  2, 0.00)
+CUTE_BORED      = P(0.40, 0.60, 0.95, 0.85,  3,  0, 0.00, 0.00, 0.80, 0.30,  3, -1, 0.55)
+CUTE_SURPRISE   = P(1.40, 1.40, 1.05, 1.05, -6, -6, 0.00, 0.00, 0.50, 0.90, -12, -12, 0.55)
+CUTE_CURIOUS    = P(1.15, 0.85, 1.10, 1.00, -3,  2, 0.00, 0.00, 1.25, 0.80, -6,  3, 0.55)
+CUTE_THINK      = P(0.75, 0.40, 0.90, 0.80, -2,  3, 0.00, 0.30, 0.80, 0.35,  3,  7, 0.55)
+CUTE_CONFUSED   = P(1.00, 0.60, 1.00, 0.85,  0,  3, 0.00, 0.00, 0.85, 0.40, -3,  6, 0.55)
+CUTE_SPEAK      = P(0.90, 0.90, 1.00, 1.00,  0,  0, 0.00, 0.00, 1.00, 0.60, -2, -2, 0.55)
+CUTE_BLINK      = P(0.00, 0.00, 1.00, 1.00,  0,  0, 0.00, 0.00, 1.00, 0.00, -1, -1, 0.55)
+CUTE_WINK       = P(0.90, 0.00, 1.05, 1.00, -1,  0, 0.00, 0.00, 1.10, 0.80, -4,  2, 0.55)
+CUTE_LOOK_L     = P(0.90, 0.90, 0.85, 1.08, -1, -1, 0.00, 0.00, 0.95, 0.70,  0,  0, 0.55)
+CUTE_LOOK_R     = P(0.90, 0.90, 1.08, 0.85, -1, -1, 0.00, 0.00, 0.95, 0.70,  0,  0, 0.55)
+CUTE_LOOK_U     = P(1.05, 1.05, 0.90, 0.90, -8, -8, 0.00, 0.00, 0.95, 0.70, -2, -2, 0.55)
+CUTE_HEART_EYES = P(1.10, 1.10, 1.10, 1.10, -3, -3, 0.30, 0.30, 1.00, 0.90, -7, -7, 0.55)
+CUTE_STAR_EYES  = P(1.20, 1.20, 1.05, 1.05, -4, -4, 0.00, 0.00, 1.00, 1.00, -9, -9, 0.55)
+
+CUTE_EXPRESSIONS = {
+    "happy": {"intro_target": CUTE_HAPPY, "intro_speed": 0.15, "loop_target": CUTE_HAPPY, "loop_duration": 3.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+    "laugh": {"intro_target": CUTE_LAUGH, "intro_speed": 0.12, "loop_target": CUTE_LAUGH, "loop_duration": 2.5, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "excited": {"intro_target": CUTE_EXCITED, "intro_speed": 0.18, "loop_target": CUTE_EXCITED, "loop_duration": 2.0, "loop_dynamic": True, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+    "angry": {"intro_target": CUTE_ANGRY, "intro_speed": 0.20, "loop_target": CUTE_ANGRY, "loop_duration": 2.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "surprised": {"intro_target": CUTE_SURPRISE, "intro_speed": 0.20, "loop_target": CUTE_SURPRISE, "loop_duration": 1.5, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "scared": {"intro_target": CUTE_SCARED, "intro_speed": 0.20, "loop_target": CUTE_SCARED, "loop_duration": 1.5, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "smile": {"intro_target": CUTE_SMILE, "intro_speed": 0.10, "loop_target": CUTE_SMILE, "loop_duration": 5.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "relaxed": {"intro_target": CUTE_RELAXED, "intro_speed": 0.06, "loop_target": CUTE_RELAXED, "loop_duration": 5.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.06},
+    "sad": {"intro_target": CUTE_SAD, "intro_speed": 0.08, "loop_target": CUTE_SAD, "loop_duration": 4.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.06},
+    "sleepy": {"intro_target": CUTE_SLEEPY, "intro_speed": 0.03, "loop_target": CUTE_SLEEPY, "loop_duration": 999999.0},
+    "bored": {"intro_target": CUTE_BORED, "intro_speed": 0.08, "loop_target": CUTE_BORED, "loop_duration": 4.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.06},
+    "idle": {"loop_target": CUTE_IDLE_P, "loop_dynamic": True},
+    "curious": {"intro_target": CUTE_CURIOUS, "intro_speed": 0.12, "loop_target": CUTE_CURIOUS, "loop_duration": 3.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "thinking": {"intro_target": CUTE_THINK, "intro_speed": 0.12, "loop_target": CUTE_THINK, "loop_duration": 4.0, "loop_dynamic": True, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "confused": {"intro_target": CUTE_CONFUSED, "intro_speed": 0.12, "loop_target": CUTE_CONFUSED, "loop_duration": 3.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "speaking": {"intro_target": CUTE_SPEAK, "intro_speed": 0.15, "loop_target": CUTE_SPEAK, "loop_duration": 4.0, "loop_dynamic": True, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+    "look_left": {"intro_target": CUTE_LOOK_L, "intro_speed": 0.15, "loop_target": CUTE_LOOK_L, "loop_duration": 1.5, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+    "look_right": {"intro_target": CUTE_LOOK_R, "intro_speed": 0.15, "loop_target": CUTE_LOOK_R, "loop_duration": 1.5, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+    "look_up": {"intro_target": CUTE_LOOK_U, "intro_speed": 0.12, "loop_target": CUTE_LOOK_U, "loop_duration": 2.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+    "wink": {"intro_target": CUTE_WINK, "intro_speed": 0.20, "loop_target": CUTE_WINK, "loop_duration": 0.3, "tail_target": CUTE_IDLE_P, "tail_speed": 0.15},
+    "blink": {"intro_target": CUTE_BLINK, "intro_speed": 0.30, "loop_target": CUTE_BLINK, "loop_duration": 0.15, "tail_target": CUTE_IDLE_P, "tail_speed": 0.25},
+    "heart_eyes": {"intro_target": CUTE_HEART_EYES, "intro_speed": 0.12, "loop_target": CUTE_HEART_EYES, "loop_duration": 3.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.08},
+    "star_eyes": {"intro_target": CUTE_STAR_EYES, "intro_speed": 0.15, "loop_target": CUTE_STAR_EYES, "loop_duration": 2.0, "tail_target": CUTE_IDLE_P, "tail_speed": 0.10},
+}
 class StateMachine:
-    def __init__(self):
-        self.current = IDLE_P.copy()
+    def __init__(self, expressions=None, idle_p=None, blink_p=None):
+        self.expressions = expressions if expressions is not None else EXPRESSIONS
+        self.idle_p = idle_p if idle_p is not None else IDLE_P
+        self.blink_p = blink_p if blink_p is not None else BLINK
+        self.current = self.idle_p.copy()
         self.phase = "loop"
         self.active_expr = "idle"
         self.next_expr = None
+        self.phase_time = 0
+        self.blink_timer = 0
+        self.next_blink = random.uniform(2.5, 5)
+        self.is_blinking = False
+        self.wink_timer = 0
+        self.next_wink = random.uniform(15, 30)
+        self.speak_t = 0
+        self.sleepy_breathe = 0
+        self.idle_bounce = 0
+        self.auto_mode = True
+        self.next_state_time = 0
+        self.idle_next_time = random.uniform(2, 4)
+        # 微行为增强
+        self.gaze_timer = 0
+        self.next_gaze = random.uniform(8, 20)
+        self.pause_active = False
+        self.pause_timer = 0
+        self.pause_duration = 0
+        self.next_pause = random.uniform(20, 60)
+        self.pause_cooldown = 0
+        # 眨眼帧序列
+        self.blink_phase = 0  # 0=none, 1=closing, 2=closed, 3=opening
+        self.blink_frame_time = 0
+        # 触控后暂停随机眼动
+        self.interact_cooldown = 0
+        # 舵机控制
+        self.gimbal = None
+        self.last_gimbal_expr = None
+        # VFX回调
+        self._on_expr_change = None  # callable(expr_name)
+        # v7: 呼吸参数回调(anim_director.get_breath_params)
+        self._breath_params_cb = None
+        # v9: 参数过渡系统(easing驱动)
+        self._param_trans = False      # 是否正在做参数过渡
+        self._param_trans_time = 0.0   # 过渡已用时间
+        self._param_trans_dur = 0.3    # 过渡总时长
+        self._param_trans_from = None  # 过渡起点Params快照
+        self._param_easing = "ease_out_quad"  # 过渡easing函数名
+        self._prev_expr = "idle"       # 上一个表情名(用于查过渡规则)
         self.phase_time = 0
         self.blink_timer = 0
         self.next_blink = random.uniform(2.5, 5)
@@ -501,7 +626,7 @@ class StateMachine:
         print(f'[GIMBAL] {expr_name} -> P{pan_a} T{tilt_a}')
 
     def trigger(self, expr_name):
-        if expr_name not in EXPRESSIONS:
+        if expr_name not in self.expressions:
             return
         old_expr = self.active_expr
         if expr_name == "idle":
@@ -540,7 +665,7 @@ class StateMachine:
             self._param_easing = "ease_out_quad"
 
         self.phase = "intro"
-        if "intro_target" not in EXPRESSIONS.get(expr_name, {}):
+        if "intro_target" not in self.expressions.get(expr_name, {}):
             self.phase = "loop"
         else:
             self.phase = "intro"
@@ -651,10 +776,10 @@ class StateMachine:
             if self.blink_phase == 1:
                 spd = 0.40
             elif self.blink_phase == 3:
-                target = self._get_current_target() or IDLE_P
+                target = self._get_current_target() or self.idle_p
                 spd = 0.30
             else:
-                target = BLINK
+                target = self.blink_p
                 spd = 0.30 if self.current.l_open > 0.5 else 0.25
             self.current.lerp(target, spd)
             return
@@ -680,7 +805,7 @@ class StateMachine:
                 if t >= 1.0:
                     self._param_trans = False
             else:
-                defn = EXPRESSIONS[self.active_expr]
+                defn = self.expressions[self.active_expr]
                 if self.phase == "intro":
                     spd = defn.get("intro_speed", 0.10)
                 elif self.phase == "tail":
@@ -690,7 +815,7 @@ class StateMachine:
                 self.current.lerp(target, spd)
 
     def _update_intro(self, dt):
-        defn = EXPRESSIONS[self.active_expr]
+        defn = self.expressions[self.active_expr]
         target = defn["intro_target"]
         spd = defn.get("intro_speed", 0.10)
         self.current.lerp(target, spd)
@@ -699,7 +824,7 @@ class StateMachine:
             self.phase_time = 0
 
     def _update_loop(self, dt):
-        defn = EXPRESSIONS[self.active_expr]
+        defn = self.expressions[self.active_expr]
         if defn.get("loop_dynamic"):
             if self.active_expr == "sleepy":
                 self.sleepy_breathe += dt
@@ -745,11 +870,11 @@ class StateMachine:
                 self.next_state_time = random.uniform(2, 4)
 
     def _update_tail(self, dt):
-        defn = EXPRESSIONS[self.active_expr]
-        tail_target = defn.get("tail_target", IDLE_P)
+        defn = self.expressions[self.active_expr]
+        tail_target = defn.get("tail_target", self.idle_p)
         spd = defn.get("tail_speed", 0.08)
         if isinstance(tail_target, str):
-            tail_target = EXPRESSIONS.get(tail_target, {}).get("intro_target", IDLE_P)
+            tail_target = self.expressions.get(tail_target, {}).get("intro_target", IDLE_P)
         self.current.lerp(tail_target, spd)
         if self.current.is_close(tail_target):
             if self.active_expr == "sleepy":
@@ -803,14 +928,14 @@ class StateMachine:
             self._goto_expr("bored")
 
     def _get_current_target(self):
-        defn = EXPRESSIONS[self.active_expr]
+        defn = self.expressions[self.active_expr]
         if self.phase == "intro":
             return defn["intro_target"]
         elif self.phase == "loop":
             return defn["loop_target"]
         elif self.phase == "tail":
-            return defn.get("tail_target", IDLE_P)
-        return IDLE_P
+            return defn.get("tail_target", self.idle_p)
+        return self.idle_p
 
 
 # ═══ NPC状态机 ═══
@@ -1293,6 +1418,109 @@ class AmbientManager:
 
 
 # ═══════════════════════════════════════════════════════
+
+
+# ═══ CuteAmbientManager — 可爱氛围层 ═══
+class CuteAmbientManager:
+    """可爱氛围：暖色面部柔光 + 飘浮爱心/星星/闪光粒子"""
+    PARTICLE_TYPES = ["heart", "star", "sparkle"]
+
+    def __init__(self, face_cx, face_cy):
+        self.face_cx = face_cx; self.face_cy = face_cy
+        self.width = WIDTH; self.height = HEIGHT
+        self._glow_alpha = 0.0; self._glow_target = 0.12
+        self._glow_color = list(CuteStyle.MOOD_GLOW["idle"])
+        self._glow_target_color = list(CuteStyle.MOOD_GLOW["idle"])
+        self._breath_phase = 0.0
+        self._particles = []
+        self._spawn_timer = 0.0; self._spawn_interval = 0.8
+        self._max_particles = 15; self._mood = "idle"
+
+    def set_mood(self, mood_name):
+        if mood_name == self._mood: return
+        self._mood = mood_name
+        color = list(CuteStyle.MOOD_GLOW.get(mood_name, CuteStyle.MOOD_GLOW["idle"]))
+        self._glow_target_color = color
+        self._glow_target = 0.18 if mood_name not in ("idle", "sleepy") else 0.10
+
+    def update(self, dt):
+        for i in range(3):
+            self._glow_color[i] += (self._glow_target_color[i] - self._glow_color[i]) * min(1.0, 2.0 * dt)
+        self._glow_alpha += (self._glow_target - self._glow_alpha) * min(1.0, 2.0 * dt)
+        self._breath_phase += dt * 0.8
+        self._spawn_timer += dt
+        if self._spawn_timer >= self._spawn_interval and len(self._particles) < self._max_particles:
+            self._spawn_timer = 0; self._spawn_particle()
+        alive = []
+        for p in self._particles:
+            p["life"] -= dt
+            if p["life"] <= 0: continue
+            p["x"] += p["vx"] * dt; p["y"] += p["vy"] * dt
+            if p["type"] in ("heart", "star"):
+                p["x"] += math.sin(p["life"] * 2.0 + p.get("phase", 0)) * 0.4
+            ml = p["max_life"]
+            if p["life"] > ml - 0.4: p["alpha"] = min(1.0, (ml - p["life"]) / 0.4) * p["peak_alpha"]
+            elif p["life"] < 0.8: p["alpha"] = (p["life"] / 0.8) * p["peak_alpha"]
+            else: p["alpha"] = p["peak_alpha"]
+            if p["type"] == "star": p["rotation"] += dt * 30
+            if p["alpha"] > 0.02: alive.append(p)
+        self._particles = alive
+
+    def _spawn_particle(self):
+        ptype = random.choice(self.PARTICLE_TYPES)
+        color = random.choice(CuteStyle.PARTICLE_COLORS[ptype])
+        max_life = random.uniform(3.0, 7.0)
+        x = random.uniform(self.width * 0.05, self.width * 0.95)
+        y = self.height + 15
+        vx = random.uniform(-10, 10); vy = random.uniform(-35, -15)
+        size = random.uniform(6, 14) if ptype == "heart" else random.uniform(5, 10)
+        self._particles.append({"type": ptype, "x": x, "y": y, "vx": vx, "vy": vy,
+            "size": size, "color": color, "life": max_life, "max_life": max_life,
+            "alpha": 0.0, "peak_alpha": random.uniform(0.3, 0.6),
+            "phase": random.uniform(0, 6.28), "rotation": random.uniform(0, 360)})
+
+    def get_glow_color(self):
+        return tuple(int(self._glow_color[i]) for i in range(3))
+
+    def draw_glow(self, screen, cx=None, cy=None):
+        if self._glow_alpha < 0.01: return
+        cx = cx or self.face_cx; cy = cy or self.face_cy
+        breath = 1.0 + 0.06 * math.sin(self._breath_phase * math.pi * 2)
+        base_r = int(240 * breath); glow_size = base_r * 2 + 40
+        gc = self.get_glow_color()
+        surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+        center = glow_size // 2
+        for i in range(6):
+            t = i / 5; frac = 1.0 - t * 0.85; r = max(3, int(base_r * frac))
+            alpha = int(self._glow_alpha * (0.03 + t * 0.28) * 255)
+            alpha = min(255, max(0, alpha))
+            pygame.draw.circle(surf, (*gc, alpha), (center, center), r)
+        screen.blit(surf, (cx - center, cy - center))
+
+    def draw_particles(self, screen, half=False):
+        for i, p in enumerate(self._particles):
+            if half and i % 2 == 1: continue
+            if p["alpha"] < 0.02: continue
+            alpha = int(min(255, p["alpha"] * 255)); color = (*p["color"], alpha); s = int(p["size"])
+            if p["type"] == "heart":
+                surf = pygame.Surface((s * 2 + 4, s * 2 + 4), pygame.SRCALPHA)
+                pygame.draw.circle(surf, color, (s // 2 + 2, s // 2 + 2), s // 2)
+                pygame.draw.circle(surf, color, (s + s // 2 + 2, s // 2 + 2), s // 2)
+                pts = [(2, s // 2 + s // 3), (s * 2 + 2, s // 2 + s // 3), (s + 2, s * 2)]
+                pygame.draw.polygon(surf, color, pts)
+                screen.blit(surf, (int(p["x"]) - s - 2, int(p["y"]) - s - 2))
+            elif p["type"] == "star":
+                pts = []
+                for j in range(10):
+                    ang = math.radians(j * 36 + p.get("rotation", 0))
+                    r = s if j % 2 == 0 else s * 0.4
+                    pts.append((int(p["x"]) + r * math.cos(ang - math.pi / 2), int(p["y"]) + r * math.sin(ang - math.pi / 2)))
+                pygame.draw.polygon(screen, color, pts)
+            else:
+                surf = pygame.Surface((s * 3, s * 3), pygame.SRCALPHA); cs = s * 3 // 2
+                pygame.draw.circle(surf, color, (cs, cs), s)
+                pygame.draw.circle(surf, (*p["color"], alpha // 3), (cs, cs), s * 2)
+                screen.blit(surf, (int(p["x"]) - cs, int(p["y"]) - cs))
 # v6 新增：AssetLoader + VFXManager
 # ═══════════════════════════════════════════════════════
 
@@ -2942,6 +3170,143 @@ class Renderer:
         self.screen.blit(card, (cx, cy))
 
 
+
+# ═══ CuteRenderer — 可爱风渲染引擎 ═══
+class CuteRenderer:
+    """可爱自信风渲染器"""
+
+    def __init__(self, screen):
+        self.screen = screen
+        self.face_center_x = WIDTH // 2
+        self._current_expr = "idle"
+        self.face_center_y = HEIGHT // 2 + 20
+        self.eye_rx = 90; self.eye_ry = 112
+        self.eye_spacing = 250; self.eye_y_offset = -42
+        self.brow_y_offset = -240
+        self.pupil_mode = "normal"; self._pupil_mode_timer = 0.0
+        pygame.freetype.init()
+        self.font_small = None
+        for fp in ["/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc"]:
+            if os.path.exists(fp):
+                try: self.font_small = pygame.freetype.Font(fp, 13); break
+                except: pass
+        if self.font_small is None: self.font_small = pygame.freetype.Font(None, 13)
+
+    def set_expression(self, expr_name): self._current_expr = expr_name
+    def set_pupil_mode(self, mode, duration=3.0): self.pupil_mode = mode; self._pupil_mode_timer = duration
+    def update(self, dt):
+        if self._pupil_mode_timer > 0:
+            self._pupil_mode_timer -= dt
+            if self._pupil_mode_timer <= 0: self.pupil_mode = "normal"; self._pupil_mode_timer = 0
+    def on_expression_change(self, expr_name): self._current_expr = expr_name
+
+    def draw(self, state, face_scale=1.0, offset_x=0, offset_y=0,
+             body_scale_x=1.0, body_scale_y=1.0, body_offset_x=0, body_offset_y=0,
+             spacing_scale=1.0, vfx_mgr=None, ambient_mgr=None, perf=None):
+        cx = self.face_center_x + offset_x + body_offset_x
+        cy = self.face_center_y + offset_y + body_offset_y
+        self.screen.fill(CuteStyle.BG_COLOR)
+        if ambient_mgr and (perf is None or perf.enable_glow):
+            ambient_mgr.draw_glow(self.screen, cx, cy)
+        for side in [-1, 1]:
+            l_open = state.l_open if side < 0 else state.r_open
+            l_w = state.l_w if side < 0 else state.r_w
+            l_y = state.l_y if side < 0 else state.r_y
+            l_cut = state.l_cut if side < 0 else state.r_cut
+            pupil_sc = state.pupil_scale; hl = state.highlight
+            ex = cx + side * self.eye_spacing * face_scale * body_scale_x
+            ey = cy + self.eye_y_offset * face_scale + l_y * face_scale
+            px_shift = -6 * face_scale if self._current_expr == "look_left" else (6 * face_scale if self._current_expr == "look_right" else 0)
+            self._draw_eye(ex, ey, l_open, l_w, l_cut, pupil_sc, hl, px_shift, face_scale)
+        if state.blush > 0.01: self._draw_blush(cx, cy, state.blush, face_scale)
+        if self._current_expr != "sleepy":
+            for side in [-1, 1]:
+                bry = state.brow_l if side < 0 else state.brow_r
+                bx = cx + side * self.eye_spacing * face_scale * body_scale_x
+                by = cy + self.brow_y_offset * face_scale
+                self._draw_eyebrow(bx, by, bry, face_scale, side)
+        if ambient_mgr and (perf is None or perf.enable_dots):
+            ambient_mgr.draw_particles(self.screen, half=(perf.dots_half if perf else False))
+
+    def _draw_blush(self, cx, cy, blush_val, scale):
+        alpha = int(min(140, blush_val * 180))
+        if alpha < 5: return
+        for side in [-1, 1]:
+            bx = cx + side * (self.eye_spacing + 203) * scale
+            by = cy + (self.eye_y_offset + 196) * scale
+            brx = int(91 * scale); bry = int(52 * scale)
+            surf = pygame.Surface((brx * 2 + 8, bry * 2 + 8), pygame.SRCALPHA)
+            pygame.draw.ellipse(surf, (*CuteStyle.BLUSH_COLOR, alpha), (4, 4, brx * 2, bry * 2))
+            self.screen.blit(surf, (bx - brx - 4, by - bry - 4))
+
+    def _draw_eye(self, cx, cy, open_r, w_scale, cut, pupil_sc, hl, px_shift, face_scale):
+        bw = int(self.eye_rx * w_scale * face_scale)
+        bh = int(self.eye_ry * max(0.01, open_r) * face_scale)
+        px = cx + px_shift; py = cy
+        if bh < 10:
+            lw = max(6, int(14 * face_scale))
+            pts = [(cx - bw + int(bw * 2 * (i / 11.0)), cy + int(math.sin((i / 11.0) * math.pi) * 2)) for i in range(12)]
+            pygame.draw.lines(self.screen, CuteStyle.PUPIL_COLOR, False, pts, lw); return
+        cut_pixels = int(bh * cut * 2.0) if cut > 0.1 else 0
+        if self.pupil_mode == "heart": self._draw_heart_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
+        elif self.pupil_mode == "star": self._draw_star_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
+        ww = int(bw * 1.6); wh = int(bh * 1.6)
+        pygame.draw.ellipse(self.screen, (250, 250, 250), (px - ww, py - wh, ww * 2, wh * 2))
+        pygame.draw.ellipse(self.screen, CuteStyle.PUPIL_COLOR, (px - bw, py - bh, bw * 2, bh * 2))
+        if cut_pixels > 0:
+            clip_y = py + bh - cut_pixels; clip_h = wh + cut_pixels + 8
+            pygame.draw.rect(self.screen, CuteStyle.BG_COLOR, (px - ww - 4, clip_y, ww * 2 + 8, clip_h))
+            arc_pts = [(px - bw + int(bw * 2 * (i / 20.0)), clip_y + int(math.sin((i / 20.0) * math.pi) * 4)) for i in range(21)]
+            pygame.draw.lines(self.screen, CuteStyle.PUPIL_COLOR, False, arc_pts, 3)
+        if open_r > 0.05 and hl > 0.05:
+            hr = max(10, int(31 * hl * face_scale))
+            hx = px - int(bw * 0.38); hy = py - int(bh * 0.40)
+            pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (hx, hy), hr)
+
+    def _draw_heart_eye(self, cx, cy, bw, bh, cut_pixels, hl, face_scale):
+        s = max(bw, bh); size = int(s * 0.85); surf_size = size * 3
+        surf = pygame.Surface((surf_size, surf_size), pygame.SRCALPHA)
+        cs_x, cs_y = surf_size // 2, surf_size // 2 - size // 3; c = CuteStyle.PUPIL_COLOR
+        pygame.draw.circle(surf, c, (cs_x - size // 2, cs_y), size // 2)
+        pygame.draw.circle(surf, c, (cs_x + size // 2, cs_y), size // 2)
+        pts = [(cs_x - size, cs_y + size // 4), (cs_x + size, cs_y + size // 4), (cs_x, cs_y + size + size // 2)]
+        pygame.draw.polygon(surf, c, pts)
+        if hl > 0.05:
+            hr = max(7, int(21 * hl * face_scale))
+            pygame.draw.circle(surf, CuteStyle.PUPIL_HIGHLIGHT, (cs_x - int(size * 0.30), cs_y - int(size * 0.28)), hr)
+        self.screen.blit(surf, (cx - cs_x, cy - cs_y))
+
+    def _draw_star_eye(self, cx, cy, bw, bh, cut_pixels, hl, face_scale):
+        size = max(bw, bh)
+        pts = [(cx + (size if i % 2 == 0 else size * 0.45) * math.cos(math.radians(i * 36 - 90)),
+                cy + (size if i % 2 == 0 else size * 0.45) * math.sin(math.radians(i * 36 - 90))) for i in range(10)]
+        pygame.draw.polygon(self.screen, CuteStyle.PUPIL_COLOR, pts)
+        if hl > 0.05:
+            pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (cx - int(size * 0.30), cy - int(size * 0.28)), max(6, int(17 * hl * face_scale)))
+
+    def _draw_eyebrow(self, cx, cy, brow_offset, face_scale, side):
+        blen = int(182 * face_scale); to = max(10, int(17 * face_scale)); ti = max(3, int(6 * face_scale))
+        tilt = brow_offset * face_scale * 1.5; half = blen // 2
+        if side < 0: x1, y1 = cx - half, cy - int(28 * face_scale) + tilt; x2, y2 = cx + half, cy + int(7 * face_scale) - tilt * 0.5
+        else: x1, y1 = cx + half, cy - int(28 * face_scale) + tilt; x2, y2 = cx - half, cy + int(7 * face_scale) - tilt * 0.5
+        m = int(to + 5); sw = int(abs(x2 - x1) + m * 2 + 4); sh = int(abs(y2 - y1) + m * 2 + 4); cxs = sw // 2; cys = sh // 2
+        for ra, al in [(3.0, 15), (1.8, 45), (0.6, 150), (0, 255)]:
+            layer = pygame.Surface((sw, sh), pygame.SRCALPHA)
+            for i in range(30):
+                t = i / 29; sx = int((x1 + (x2 - x1) * t) - x1 + cxs); sy = int((y1 + (y2 - y1) * t) - y1 + cys)
+                sr = max(1, int(to + (ti - to) * t + ra))
+                pygame.draw.circle(layer, (*CuteStyle.BROW_COLOR, al), (sx, sy), sr)
+            self.screen.blit(layer, (x1 - cxs, y1 - cys))
+
+    def draw_hud(self, info):
+        try:
+            for i, l in enumerate([
+                f"FPS:{info.get('fps', 0):.0f} | {info.get('expr', '?')} | {info.get('phase', '?')}",
+                f"MOOD:{info.get('mood', '?')} | PERF:{info.get('perf', '?')} | DOTS:{info.get('dots', 0)}",
+            ]):
+                s, _ = self.font_small.render(l, (120, 100, 90))
+                self.screen.blit(s, (WIDTH - 350, 12 + i * 18))
+        except: pass
 # ── 卡片管理 ──
 class CardManager:
     def __init__(self):
@@ -3209,6 +3574,12 @@ class VoiceManager:
     def start_record(self):
         if self.proc:
             return
+        # 清理上次残留的录音文件
+        for _f in ["/tmp/voice_in.wav", "/tmp/voice_mono.wav", "/tmp/tts_out.wav",
+                   "/tmp/voice_debug.txt", "/tmp/v10_debug.txt"]:
+            try: os.remove(_f)
+            except: pass
+        self.asr_text = ""  # 清空旧ASR文字
         self._tts_stop = True
         _subprocess.run(["pkill", "-f", "aplay.*tts_out"], capture_output=True, timeout=1)
         self.state = "listening"
@@ -3223,37 +3594,16 @@ class VoiceManager:
         self.state = "thinking"
         try:
             self.proc.terminate()
-            self.proc.wait(timeout=3)
+            self.proc.wait(timeout=0.5)
         except:
             try: self.proc.kill()
             except: pass
         self.proc = None
-        print("[Voice] Recording stopped, converting to mono...")
+        print("[Voice] Recording stopped")
         if not os.path.exists(self.rec_file):
             self.state = "idle"
             return None
-        try:
-            with wave.open(self.rec_file, 'rb') as wf:
-                raw = wf.readframes(wf.getnframes())
-        except:
-            self.state = "idle"
-            return None
-        if len(raw) < 2048:
-            self.state = "idle"
-            return None
-        rs = struct.unpack(f'<{len(raw)//2}h', raw)
-        mono = struct.pack(f'<{len(rs)//2}h', *(rs[::2]))
-        samples = list(struct.unpack(f'<{len(mono)//2}h', mono))
-        mx = max(abs(x) for x in samples) if samples else 0
-        if 0 < mx < 15000:
-            g = 15000 / mx
-            samples = [min(32767, max(-32768, int(x*g))) for x in samples]
-            mono = struct.pack(f'<{len(samples)}h', *samples)
-        wf_out = wave.open(self.mono_file, 'wb')
-        wf_out.setnchannels(1); wf_out.setsampwidth(2)
-        wf_out.setframerate(16000); wf_out.writeframes(mono)
-        wf_out.close()
-        return self.mono_file
+        return self.rec_file  # 返回原始文件，转码在子线程做
 
     def asr(self, wav_path):
         """语音识别 - MiMo-V2.5-ASR (OpenAI兼容流式)"""
@@ -3321,10 +3671,16 @@ class VoiceManager:
                 _f.write(f"asr EXCEPTION: {e}\n")
         return ""
 
-    def tts(self, text, voice="冰糖", on_start=None, on_end=None):
+    def tts(self, text, voice=None, on_start=None, on_end=None):
         """MiMo-V2.5-TTS -> WAV + aplay播放"""
         if not text: return
-        print(f"[TTS] MiMo-TTS: {text[:40]}...")
+        if voice is None:
+            # 根据当前风格选择音色：霓虹=冰糖(女), 可爱=苏打(男)
+            try:
+                voice = "苏打" if face_style == 'cute' else "冰糖"
+            except:
+                voice = "冰糖"
+        print(f"[TTS] MiMo-TTS ({voice}): {text[:40]}...")
         if on_start: on_start()
         if self.proc:
             self.proc.terminate()
@@ -3452,7 +3808,27 @@ class VoiceManager:
         try:
             # 调试: 写ASR开始标记
             with open('/tmp/voice_debug.txt','w') as _f:
-                _f.write(f"wav={wav_path} size={os.path.getsize(wav_path) if os.path.exists(wav_path) else 0}\n")
+                _f.write(f"wav={wav_path} size={os.path.getsize(wav_path) if os.path.exists(wav_path) else 0}\\n")
+            # 转码: 立体声→单声道 (子线程, 不阻塞主循环)
+            import wave as _w, struct as _st, os as _os
+            _mono_path = wav_path.replace('.wav','_mono.wav')
+            try:
+                with _w.open(wav_path, 'rb') as _wf:
+                    _raw = _wf.readframes(_wf.getnframes())
+                if len(_raw) >= 2048:
+                    _rs = _st.unpack(f'<{len(_raw)//2}h', _raw)
+                    _mono = _st.pack(f'<{len(_rs)//2}h', *(_rs[::2]))
+                    _samples = list(_st.unpack(f'<{len(_mono)//2}h', _mono))
+                    _mx = max(abs(x) for x in _samples) if _samples else 0
+                    if 0 < _mx < 15000:
+                        _g = 15000 / _mx
+                        _samples = [min(32767, max(-32768, int(x*_g))) for x in _samples]
+                        _mono = _st.pack(f'<{len(_samples)}h', *_samples)
+                    with _w.open(_mono_path, 'wb') as _wf_out:
+                        _wf_out.setnchannels(1); _wf_out.setsampwidth(2)
+                        _wf_out.setframerate(16000); _wf_out.writeframes(_mono)
+                    wav_path = _mono_path
+            except: pass
             txt = self.asr(wav_path)
             self.asr_text = txt
             with open('/tmp/voice_debug.txt','a') as _f:
@@ -4071,6 +4447,34 @@ def _on_expr_change_chain(expr_name):
         ambient_mgr.set_mood(mood)
 sm._on_expr_change = _on_expr_change_chain
 sm._breath_params_cb = anim_director.get_breath_params  # v7: 情绪呼吸
+sm_cute = StateMachine(CUTE_EXPRESSIONS, CUTE_IDLE_P, CUTE_BLINK)
+cute_renderer = CuteRenderer(screen)
+cute_ambient_mgr = CuteAmbientManager(WIDTH // 2, HEIGHT // 2)
+face_style = 'neon'
+
+def _get_active_sm():
+    return sm_cute if face_style == 'cute' else sm
+
+def _get_active_renderer():
+    return cute_renderer if face_style == 'cute' else renderer
+
+def _get_active_ambient():
+    return cute_ambient_mgr if face_style == 'cute' else ambient_mgr
+
+def _on_cute_expr_change(expr_name):
+    anim_director.on_expression_change(expr_name)
+    m = {'idle': 'idle', 'happy': 'happy', 'laugh': 'happy', 'excited': 'excited',
+         'smile': 'happy', 'relaxed': 'idle', 'sad': 'sad', 'angry': 'angry',
+         'surprised': 'surprised', 'scared': 'scared', 'sleepy': 'sleepy',
+         'bored': 'idle', 'curious': 'curious', 'thinking': 'focus',
+         'confused': 'curious', 'heart_eyes': 'love', 'star_eyes': 'excited',
+         'speaking': 'happy'}
+    mood = m.get(expr_name)
+    if mood: cute_ambient_mgr.set_mood(mood)
+
+sm_cute._on_expr_change = _on_cute_expr_change
+sm_cute._breath_params_cb = anim_director.get_breath_params
+
 
 # 初始化舵机
 gimbal_ctrl = GimbalController()
@@ -4194,9 +4598,26 @@ while running:
                 _is_sleeping = False
                 if npc_sm: npc_sm._set_state(NPCState.IDLE)
                 if gimbal_ctrl is not None and not _face_search_active:
-                    _face_search_active = True
-                    _face_search = HailoFace(gimbal_ctrl)
-                    _face_search.start()
+                    # 检查摄像头是否可用
+                    _camera_ok = False
+                    try:
+                        from picamera2 import Picamera2
+                        _info = Picamera2.global_camera_info()
+                        if len(_info) > 0:
+                            _camera_ok = True
+                    except:
+                        pass
+                    if _camera_ok:
+                        try:
+                            _face_search_active = True
+                            _face_search = HailoFace(gimbal_ctrl)
+                            _face_search.start()
+                        except Exception as _fe:
+                            print(f"[Face] 人脸追踪不可用: {_fe}")
+                            _face_search_active = False
+                            _face_search = None
+                    else:
+                        print("[Face] 无摄像头, 跳过人脸追踪")
                 print("[Voice] Push-to-talk: 开始录音")
             elif event.key == pygame.K_n:
                 # N: 切换NPC模式(原SPACE功能)
@@ -4281,6 +4702,19 @@ while running:
             elif event.key == pygame.K_F1:
                 # F1: 切换调试HUD
                 show_hud = not show_hud
+            elif event.key == pygame.K_F2:
+                # F2: 切换可爱/霓虹风格
+                if face_style == 'neon':
+                    face_style = 'cute'
+                    sm = sm_cute
+                    print("[Style] 可爱自信风")
+                else:
+                    face_style = 'neon'
+                    sm = StateMachine()
+                    print("[Style] 霓虹赛博风")
+                if npc_sm:
+                    npc_sm.sm = sm
+                sm.gimbal = gimbal_ctrl if gimbal_ctrl else None
             elif event.key == pygame.K_F12:
                 # v10: F12截图
                 ts = __import__('time').strftime('%H%M%S')
@@ -4388,7 +4822,8 @@ while running:
     vfx_mgr.update(dt)  # v6: 更新特效
     squash_stretch.update(dt)  # v7: 更新Squash&Stretch
     anim_director.update(dt)   # v7: 更新身体姿态过渡
-    renderer.update(dt)       # v8: 更新渲染器(瞳孔形态计时等)
+    active_renderer = _get_active_renderer()
+    active_renderer.update(dt)       # v8: 更新渲染器(瞳孔形态计时等)
     ambient_mgr.update(dt)    # v9: 更新环境氛围(色调/光晕/光斑)
 
     # v7: 获取身体层参数
@@ -4397,14 +4832,16 @@ while running:
     body_sy = squash_stretch.scale_y
 
     # v8: 瞳孔模式同步(heart_eyes/star_eyes)
-    if sm.active_expr == "heart_eyes" and renderer.pupil_mode != "heart":
-        renderer.set_pupil_mode("heart", duration=999)
-    elif sm.active_expr == "star_eyes" and renderer.pupil_mode != "star":
-        renderer.set_pupil_mode("star", duration=999)
-    elif sm.active_expr not in ("heart_eyes", "star_eyes") and renderer.pupil_mode != "normal":
-        renderer.set_pupil_mode("normal", duration=0)
+    active_renderer = _get_active_renderer()
+    if sm.active_expr == "heart_eyes" and active_renderer.pupil_mode != "heart":
+        active_renderer.set_pupil_mode("heart", duration=999)
+    elif sm.active_expr == "star_eyes" and active_renderer.pupil_mode != "star":
+        active_renderer.set_pupil_mode("star", duration=999)
+    elif sm.active_expr not in ("heart_eyes", "star_eyes") and active_renderer.pupil_mode != "normal":
+        active_renderer.set_pupil_mode("normal", duration=0)
 
     # v9: NPC状态→情绪氛围(每帧低频检查)
+    ambient_mgr_inst = _get_active_ambient()
     if npc_enabled and npc_sm:
         npc_mood_map = {
             NPCState.IDLE: "idle", NPCState.OBSERVE: "curious",
@@ -4412,18 +4849,18 @@ while running:
             NPCState.SLEEP: "sleepy",
         }
         npc_mood = npc_mood_map.get(npc_sm.state, "idle")
-        if ambient_mgr._mood != npc_mood:
-            ambient_mgr.set_mood(npc_mood)
+        if ambient_mgr_inst._mood != npc_mood:
+            ambient_mgr_inst.set_mood(npc_mood)
 
     # 渲染(v9: 环境层内置于renderer.draw)
     # face_offset_x/y = 卡片弹出时的脸角落偏移(移动整个脸)
     # body_offset_x/y = 动画(squash)微偏移(叠加在脸上)
-    renderer.draw(sm.current, card_mgr.face_scale, card_mgr.face_offset_x,
+    active_renderer.draw(sm.current, card_mgr.face_scale, card_mgr.face_offset_x,
                   body_scale_x=body_sx, body_scale_y=body_sy,
                   body_offset_x=body_ox,
                   body_offset_y=body_oy + card_mgr.face_offset_y,
                   spacing_scale=card_mgr.spacing_scale,
-                  vfx_mgr=vfx_mgr, ambient_mgr=ambient_mgr, perf=perf)
+                  vfx_mgr=vfx_mgr, ambient_mgr=ambient_mgr_inst, perf=perf)
     if card_mgr.visible or card_mgr.current_alpha > 0.01:
         if card_mgr.card_type == "todo":
             renderer.draw_todo_card(card_mgr.title, card_mgr.lines, card_mgr.current_alpha)
@@ -4481,11 +4918,11 @@ while running:
             "param_t": sm._param_trans_time / sm._param_trans_dur if sm._param_trans and sm._param_trans_dur > 0 else 0,
             "fps": _actual_fps,
             "perf": perf.level if perf else "FULL",
-            "mood": ambient_mgr._mood if ambient_mgr else "idle",
-            "dots": len(ambient_mgr._dots) if ambient_mgr else 0,
+            "mood": ambient_mgr_inst._mood if ambient_mgr_inst else "idle",
+            "dots": len(ambient_mgr_inst._dots) if ambient_mgr_inst else 0,
             "vfx": len(vfx_mgr._effects) if vfx_mgr else 0,
         }
-        renderer.draw_hud(hud_info)
+        active_renderer.draw_hud(hud_info)
 
     pygame.display.flip()
 
