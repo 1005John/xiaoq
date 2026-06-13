@@ -59,10 +59,10 @@ def parse_remind_time(text):
         return target, text
     
     # 今天X点 / 晚上X点X分 / 下午X点X分
-    m = re.search(r'(今天|今晚|晚上|下午|上午|中午)?\s*([\d一二三四五六七八九十两]+)\s*点\s*([\d一二三四五六七八九十两]+)?\s*分?', text)
+    m = re.search(r'(今天|今晚|晚上|下午|上午|中午)?\s*([\d一二三四五六七八九十两]+)\s*点\s*([\d一二三四五六七八九十两]+|半)?\s*分?', text)
     if m:
         hour = _cn_to_int(m.group(2))
-        minute = _cn_to_int(m.group(3)) if m.group(3) else 0
+        minute_str = m.group(3); minute = 30 if minute_str == "半" else (_cn_to_int(minute_str) if minute_str else 0)
         prefix = m.group(1) or ''
         if prefix in ('下午','中午') and hour < 12:
             hour += 12
@@ -82,19 +82,25 @@ def parse_remind_time(text):
     return None, text
 
 if __name__ == "__main__":
-    text = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else ""
-    if not text:
-        print("用法: add.py 待办内容 [提醒时间]")
+    # 支持2个参数：原始文本(解析时间用) + 清理后文本(待办内容)
+    if len(sys.argv) >= 3:
+        raw_text = sys.argv[1]
+        text = sys.argv[2]
+    elif len(sys.argv) >= 2:
+        raw_text = sys.argv[1]
+        text = raw_text
+    else:
+        print("用法: add.py 原始文本 [待办内容]")
         sys.exit(1)
     
     # 分离待办内容和提醒时间
     remind_at = None
     remind_text = None
     
-    # 尝试解析提醒时间
-    remind_at, remind_text = parse_remind_time(text)
+    # 尝试从原始文本解析提醒时间
+    remind_at, remind_text = parse_remind_time(raw_text)
     if remind_at:
-        # 去掉时间部分，保留纯待办内容
+        # 只去掉raw_text中的时间关键词，保留text（清理后的任务名称）
         clean = re.sub(r'\d+分钟后|\d+小时后|明天.*点|今天.*点|提醒我', '', text).strip()
         if clean:
             text = clean

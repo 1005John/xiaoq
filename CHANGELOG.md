@@ -1,6 +1,17 @@
 # 变更日志
 
-## [v1.5.2] - 2026-06-09
+## [v1.5.3] - 2026-06-13
+
+### 🔧 提醒系统修复
+- **TTS 不阻塞主循环**：voice_tts 中 TTS 改为后台线程，卡片先渲染，画面不再卡死
+- **提醒卡片显示真实内容**：ReminderWatcher 传 item 给回调，卡片显示待办文本而非"待办事项"占位符
+- **add.py 双参数模式**：传原始语音文本用于解析 remind_at，LLM 提取的文本作任务名
+- **ReminderWatcher 字段修复**：`item.get('title')` → `item.get('text')`（之前字段名错误）
+- **调试日志**：提醒触发时写入 /tmp/reminder_debug.txt
+
+### 🐛 修复
+- Hailo-8L 驱动 kernel crash 导致进程退出
+- Hailo Python App 僵尸进程累积（定期清理）
 
 ### 🚀 Hailo-8L 端侧人脸检测 + Pan/Tilt 双轴追踪
 - **hailo_face_pipeline.py**：复用 hailo-apps INFERENCE_PIPELINE_WRAPPER，

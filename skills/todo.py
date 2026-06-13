@@ -333,8 +333,8 @@ class ReminderWatcher:
             try:
                 due = self._skill.get_due_reminders()
                 for item in due:
-                    tts = f"提醒您：{item.get('title', '待办事项')}"
-                    self._callback(tts)
+                    tts = f"提醒您：{item.get('text', '待办事项')}"
+                    self._callback(tts, item)
                     self._skill.mark_notified(item["id"])
             except Exception as e:
                 log.warning(f"[Reminder] Error: {e}")

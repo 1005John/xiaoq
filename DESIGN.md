@@ -1,6 +1,6 @@
 # 小Q — ���统设计
 
-> 版本：v1.5.2 | 日期：2026-06-09
+> 版本：v1.5.3 | 日期：2026-06-13
 
 ## 1. 架构概览
 
@@ -57,15 +57,16 @@
      │          → Hermes Gateway 常驻处理
      │
      └── [回退] hermes chat -q --provi$er deepseek
-  → JSON 指令解析（后台，���户无感）
-     ├── {"action":"add","text":"..."} → add.py
+  → JSON 指令解析（后台，用户无感）
+     ├── {"action":"add","text":"完整原文（包括时间）"} → add.py (raw_text + clean_label)
      ├── {"action":"query"}            → query.py
      ├── {"action":"done","index":N}   → done.py
-     └── {"action":"delete","in$ex":N} → delete.py
+     └── {"action":"delete","index":N} → delete.py
   → 卡片显示（JSON 行已剥离）+ TTS 播报
      • 完整回复显示为卡片
      • >40字时 qwen-turbo 摘要 TTS
-     • TTS: MiMo-V2.5-TTS (冰糖, 24kHz PCM16 → WV + aplay plugh7:2,0)
+     • TTS: MiMo-V2.5-TTS (冰糖, 24kHz PCM16 → WAV + aplay plughw:2,0)
+     • TTS 后台线程播放，不阻塞主循环渲染
 ```
 
 ## 3. 待办系统架构
@@ -89,10 +90,11 @@
 | YYYY-MM-DD HH:MM | 2026-06-07 14:00 | 准时 |
 
 ### 提醒机制
-- ReminderWatcher 每303扫描 todos.json
-- 到期待办 → ws_server.#ommand_queue → voice_tts → TS 播报
-- voi#e_tts 同步调���（线程安全）
+- ReminderWatcher 每30秒扫描 todos.json
+- 到期待办 → ws_server.command_queue → voice_tts + card_show
+- voice_tts 处理时先消费 card_show 渲染卡片，再后台线程播 TTS
 - 提醒后标记 notified=true
+- 回调传 item 字典，卡片显示具体待办文本而非占位符
 
 ## 4. 缓存架构
 
