@@ -1,5 +1,34 @@
 # 变更日志
 
+## [v1.6.0] - 2026-06-14
+
+### ✨ 新技能
+- **市场调研报告**：读取 shared/input/ 资料，生成 MD+HTML+PDF 报告到 output/
+- **会议纪要**：读取 shared/input/ 录音（m4a/mp3/wav），MiMo ASR 转写 → DeepSeek 生成纪要
+- **音量控制**：语音调节 ReSpeaker 音量（支持"百分之二十五"/"调到30%"/"音量多少"）
+- **共享文件夹 SSH 基础设施**：Pi → Mac mini 密钥认证，~shared/ 文件夹读写
+
+### 🎨 面部调整
+- 可爱风格眉毛往中间伸长 35%
+
+### 🔧 语音优化
+- TTS 改为官方 OpenAI 客户端流式（低延迟）
+- 恢复标准 TTS 模型（霓虹=冰糖，可爱=苏打）
+
+### 🐛 修复
+- SSH 文件列表空格导致文件名解析错误（ls -la → ls -1）
+- 变量名 `_b64` 覆盖 base64 模块导致 AttributeError
+- 音量查询正则匹配到 Limits 值（Playback 0）
+- 中文数字"百分之二十五"音量识别
+- ASR 内层 except:pass 静默吞错误
+- 卡片默认 dialog 样式统一为 todo
+- 重启进程清理（kill -9 替代 pkill）
+
+### 🧠 架构调整
+- 邮件技能改为 Hermes CLI + pi-email 技能处理
+- Little_Q_new 依赖完全移除，项目独立无依赖
+- timeout 30s → 300s, max_tokens 300 → 4096
+
 ## [v1.5.3] - 2026-06-13
 
 ### 🔧 提醒系统修复

@@ -3287,8 +3287,9 @@ class CuteRenderer:
     def _draw_eyebrow(self, cx, cy, brow_offset, face_scale, side):
         blen = int(182 * face_scale); to = max(10, int(17 * face_scale)); ti = max(3, int(6 * face_scale))
         tilt = brow_offset * face_scale * 1.5; half = blen // 2
-        if side < 0: x1, y1 = cx - half, cy - int(28 * face_scale) + tilt; x2, y2 = cx + half, cy + int(7 * face_scale) - tilt * 0.5
-        else: x1, y1 = cx + half, cy - int(28 * face_scale) + tilt; x2, y2 = cx - half, cy + int(7 * face_scale) - tilt * 0.5
+        inner_ext = int(blen * 0.35)  # 往中间多伸长35%
+        if side < 0: x1, y1 = cx - half, cy - int(28 * face_scale) + tilt; x2, y2 = cx + half + inner_ext, cy + int(7 * face_scale) - tilt * 0.5
+        else: x1, y1 = cx + half, cy - int(28 * face_scale) + tilt; x2, y2 = cx - half - inner_ext, cy + int(7 * face_scale) - tilt * 0.5
         m = int(to + 5); sw = int(abs(x2 - x1) + m * 2 + 4); sh = int(abs(y2 - y1) + m * 2 + 4); cxs = sw // 2; cys = sh // 2
         for ra, al in [(3.0, 15), (1.8, 45), (0.6, 150), (0, 255)]:
             layer = pygame.Surface((sw, sh), pygame.SRCALPHA)
@@ -3316,7 +3317,7 @@ class CardManager:
         self.current_alpha = 0.0
         self.title = ""
         self.lines = []
-        self.card_type = "dialog"  # "dialog" 或 "todo"
+        self.card_type = "todo"  # "dialog" 或 "todo"
         self.face_scale = 1.0
         self.target_scale = 1.0
         self.face_offset_x = 0
@@ -3332,7 +3333,7 @@ class CardManager:
         self.scroll_delay = 3.0      # 等待3秒开始滚动
         self._row_h = 64             # 行高(与draw_todo_card对齐)
         self._wrapped_lines = None   # 预换行缓存
-    def show(self, title, lines, card_type="dialog"):
+    def show(self, title, lines, card_type="todo"):
         self.visible = True
         self.title = title
         self.lines = lines
@@ -3346,6 +3347,7 @@ class CardManager:
         self._display_timer = 0.0
         self._scroll_done_timer = 0.0
         self._close_timer = 0.0    # 重置自动关闭计时器
+        self._no_auto_close = False  # 默认允许自动关闭
         if card_type == "todo":
             # todo: 脸缩小并随机偏移 + 眼距缩小
             self.target_scale = 0.35
@@ -3384,7 +3386,7 @@ class CardManager:
         self.face_offset_y += (self.target_offset_y - self.face_offset_y) * speed
         self.spacing_scale += (self.target_spacing - self.spacing_scale) * speed
         # ── 自动关闭 ──
-        if self.visible:
+        if self.visible and not self._no_auto_close:
             has_scroll = self.max_scroll > 0
             try:
                 if voice_mgr.state == "speaking": self._tts_was_active = True
@@ -3678,12 +3680,14 @@ class VoiceManager:
         """MiMo-V2.5-TTS -> WAV + aplay播放"""
         if not text: return
         if voice is None:
-            # 根据当前风格选择音色：霓虹=冰糖(女), 可爱=苏打(男)
             try:
                 voice = "苏打" if face_style == 'cute' else "冰糖"
             except:
                 voice = "冰糖"
-        print(f"[TTS] MiMo-TTS ({voice}): {text[:40]}...")
+
+        _model = "mimo-v2.5-tts"
+        _sys_prompt = "用自然亲切的中文女声播报"
+        print(f"[TTS] {_model} ({voice}): {text[:40]}...")
         if on_start: on_start()
         if self.proc:
             self.proc.terminate()
@@ -3695,9 +3699,9 @@ class VoiceManager:
             import urllib.request as _ur, base64 as _b64, json as _json, subprocess as _sp
 
             _body = _json.dumps({
-                "model": "mimo-v2.5-tts",
+                "model": _model,
                 "messages": [
-                    {"role": "user", "content": "用自然亲切的中文女声播报"},
+                    {"role": "user", "content": _sys_prompt},
                     {"role": "assistant", "content": text}
                 ],
                 "audio": {"format": "pcm16", "voice": voice},
@@ -4151,6 +4155,12 @@ class VoiceManager:
                         _intent = "todo"
                     elif any(w in txt for w in ["邮件","邮箱","未读邮件"]):
                         _intent = "email"
+                    elif any(w in txt for w in ["市场分析","调研报告","市场调研","竞品分析","市场研究","市场报告"]):
+                        _intent = "market"
+                    elif any(w in txt for w in ["会议纪要","生成纪要","会议记录","转录","转写"]):
+                        _intent = "meeting"
+                    elif any(w in txt for w in ["音量"]):
+                        _intent = "volume"
 
                     # ── 技能执行 ──
                     _skill_result = ""
@@ -4214,7 +4224,7 @@ class VoiceManager:
                         except: _skill_result = "新闻数据加载失败"
 
                     elif _intent == "todo":
-                        _todo_path = _o.path.expanduser("~/Little_Q_new/pi_reference_exp/data/todos.json")
+                        _todo_path = _o.path.expanduser("~/xiaoq/data/todos.json")
                         if _o.path.exists(_todo_path):
                             try:
                                 _items = _j.load(open(_todo_path))
@@ -4230,30 +4240,342 @@ class VoiceManager:
                         _sys += " 如果用户要添加/完成/删除待办，回复末尾必须包含JSON: {\"action\":\"add\",\"text\":\"完整原文（包括时间）\"} 或 {\"action\":\"done\",\"index\":N}。如果是查询，不要加JSON。"
 
                     elif _intent == "email":
-                        _email_d = _o.path.expanduser("~/.hermes/skills/email/email-knowledge")
                         try:
                             import subprocess as _em_sp
-                            if any(w in txt for w in ["更新","导入","拉取","同步"]):
-                                _r = _em_sp.run(["python3", _email_d + "/ingest.py", "--since", "1"],
-                                    capture_output=True, text=True, timeout=120)
-                                _skill_result = "邮件知识库已更新" if _r.returncode == 0 else f"邮件更新失败"
+                            _h = _o.path.expanduser("~/.local/bin/hermes")
+                            _r = _em_sp.run(
+                                [_h, "--query", txt, "--skills", "pi-email", "--provider", "deepseek", "-t", "terminal,skills"],
+                                capture_output=True, text=True, timeout=120)
+                            if _r.returncode == 0 and _r.stdout.strip():
+                                _lines = [l for l in _r.stdout.split("\n")
+                                    if l.strip()
+                                    and not l.startswith("Session:")
+                                    and not l.startswith("Duration:")
+                                    and not l.startswith("Messages:")
+                                    and not l.startswith("Resume")
+                                    and not l.startswith("Query:")
+                                    and not l.startswith("⚠")
+                                    and not l.startswith("─")
+                                    and not l.startswith("  ┊")
+                                    and not l.startswith("     ┊")
+                                    and "session_id:" not in l
+                                    and not l.startswith("Initializing")
+                                    and not l.startswith("> ")]
+                                _skill_result = "\n".join(_lines).strip() if _lines else "邮件技能执行失败"
                             else:
-                                _q = txt
-                                for _ew in ["邮件","查查","帮我","搜一下","关于"]:
-                                    _q = _q.replace(_ew, "")
-                                _q = _q.strip()
-                                if not _q:
-                                    _skill_result = "你想查什么邮件内容？"
-                                else:
-                                    _r = _em_sp.run(["python3", _email_d + "/query.py", _q],
-                                        capture_output=True, text=True, timeout=30)
-                                    if _r.returncode == 0 and _r.stdout.strip():
-                                        _skill_result = f"邮件查询结果：{_r.stdout.strip()[:500]}"
-                                    else:
-                                        _skill_result = "未找到相关邮件"
+                                _skill_result = "邮件技能执行失败"
                         except Exception as _ee:
-                            print(f"[Email] 错误: {_ee}")
+                            print(f"[Email] Hermes 错误: {_ee}")
                             _skill_result = "邮件技能执行失败"
+
+                    elif _intent == "market":
+                        _sys = "你是小Q桌面助手。用户要求生成市场调研报告，回复告诉用户报告正在生成中，稍等一下。"
+                        # 后台生成报告，不阻塞主循环
+                        def _gen_report(txt_orig):
+                            import subprocess as _sp, os as _os, json as _js, time as _tm
+                            try:
+                                _cfg_file = _os.path.expanduser("~/.hermes/skills/shared-folder/config.json")
+                                if not _os.path.exists(_cfg_file):
+                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 配置错误","lines":["共享文件夹未配置"],"card_type":"todo"})
+                                    ws_server.command_queue.append({"type":"voice_tts","text":"共享文件夹未配置"})
+                                    return
+                                _cfg = _js.load(open(_cfg_file))
+                                _user, _host, _path = _cfg["user"], _cfg["host"], _cfg["path"]
+                                # 列出输入文件
+                                _r_ls = _sp.run(["ssh","-o","ConnectTimeout=5",f"{_user}@{_host}","ls","-1",f"{_path}/input/"],
+                                    capture_output=True, text=True, timeout=10)
+                                _files = [l.strip() for l in _r_ls.stdout.split("\n") if l.strip() and not l.startswith("total") and "." in l]
+                                if not _files:
+                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 没有资料","lines":["输入文件夹没有找到资料文件","请先放文件到 input/ 目录"],"card_type":"todo"})
+                                    ws_server.command_queue.append({"type":"voice_tts","text":"输入文件夹没有找到资料文件"})
+                                    return
+                                # 读取所有文件
+                                _all_text = ""
+                                for _f in _files:
+                                    _r_cat = _sp.run(["ssh","-o","ConnectTimeout=5",f"{_user}@{_host}","cat",f"{_path}/input/{_f}"],
+                                        capture_output=True, text=True, timeout=30)
+                                    if _r_cat.returncode == 0 and _r_cat.stdout.strip():
+                                        _all_text += f"\n--- {_f} ---\n{_r_cat.stdout.strip()}\n"
+                                # 调用 DeepSeek 生成报告
+                                _key2 = os.environ.get("DEEPSEEK_API_KEY","")
+                                if not _key2:
+                                    _env = _os.path.expanduser("~/.hermes/.env")
+                                    if _os.path.exists(_env):
+                                        for _l in open(_env):
+                                            if _l.startswith("DEEPSEEK_API_KEY="):
+                                                _key2 = _l.strip().split("=",1)[1].strip("\"'")
+                                if not _key2:
+                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 配置错误","lines":["API密钥未配置"],"card_type":"todo"})
+                                    ws_server.command_queue.append({"type":"voice_tts","text":"API密钥未配置"})
+                                    return
+                                _prompt = f"""你是市场调研分析师。根据以下资料，生成一份完整的市场调研报告。
+
+资料：
+{_all_text}
+
+请按照以下框架撰写报告，输出 Markdown 格式：
+
+1. 概述（调研背景、范围、数据来源）
+2. 市场规模（TAM/SAM/SOM）
+3. 竞品分析矩阵（表格对比各竞品的定位、功能、价格、优劣势）
+4. 竞品详细分析
+5. SWOT 分析
+6. 市场趋势（技术/政策/客户需求）
+7. 客户画像
+8. 结论与建议"""
+                                import urllib.request as _ur
+                                _body = _js.dumps({
+                                    "model":"deepseek-chat",
+                                    "messages":[{"role":"user","content":_prompt}],
+                                    "max_tokens":4096,
+                                }).encode()
+                                _req = _ur.Request("https://api.deepseek.com/v1/chat/completions",
+                                    data=_body,
+                                    headers={"Content-Type":"application/json","Authorization":f"Bearer {_key2}"})
+                                with _ur.urlopen(_req, timeout=300) as _resp:
+                                    _report = _js.loads(_resp.read())["choices"][0]["message"]["content"].strip()
+                                # 写回到 output：MD + HTML + PDF
+                                _ts = _tm.strftime("%Y%m%d_%H%M%S")
+                                _md_name = f"市场调研报告_{_ts}.md"
+                                _html_name = f"市场调研报告_{_ts}.html"
+                                _pdf_name = f"市场调研报告_{_ts}.pdf"
+                                # 写 MD
+                                _sp.run(["ssh",f"{_user}@{_host}","cat",">",f"{_path}/output/{_md_name}"],
+                                    input=_report, text=True, timeout=30)
+                                # 生成带 CSS 的 HTML（先转 Markdown → HTML）
+                                import markdown as _md
+                                _report_html = _md.markdown(_report, extensions=["fenced_code", "tables"])
+                                _html_template = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>市场调研报告</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; color: #1a1a2e; background: #f8f9fa; line-height: 1.8; }
+h1 { color: #16213e; border-bottom: 3px solid #0f3460; padding-bottom: 10px; }
+h2 { color: #0f3460; margin-top: 30px; border-left: 4px solid #e94560; padding-left: 12px; }
+h3 { color: #533483; }
+table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+th { background: #0f3460; color: white; padding: 10px; text-align: left; }
+td { border: 1px solid #ddd; padding: 10px; }
+tr:nth-child(even) { background: #f1f1f1; }
+pre { background: #1a1a2e; color: #e0e0e0; padding: 15px; border-radius: 6px; overflow-x: auto; }
+blockquote { border-left: 4px solid #e94560; margin: 15px 0; padding: 10px 20px; background: #f1f1f1; }
+</style></head><body>
+__REPORT_CONTENT__
+</body></html>"""
+                                _html = _html_template.replace("__REPORT_CONTENT__", _report_html)
+                                # 写 HTML
+                                _sp.run(["ssh",f"{_user}@{_host}","cat",">",f"{_path}/output/{_html_name}"],
+                                    input=_html, text=True, timeout=30)
+                                # 转 PDF
+                                import weasyprint
+                                _pdf_bytes = weasyprint.HTML(string=_html).write_pdf()
+                                _tmp_pdf = f"/tmp/{_pdf_name}"
+                                with open(_tmp_pdf, "wb") as _pf:
+                                    _pf.write(_pdf_bytes)
+                                _sp.run(["scp",_tmp_pdf,f"{_user}@{_host}:{_path}/output/{_pdf_name}"],
+                                    capture_output=True, text=True, timeout=30)
+                                _os.remove(_tmp_pdf)
+                                # 通知用户（卡片 + TTS）
+                                ws_server.command_queue.append({"type":"card_show","title":"✅ 报告完成","lines":["市场调研报告已生成","格式: MD / HTML / PDF","保存在 output 文件夹"],"card_type":"todo","no_auto_close":True})
+                                ws_server.command_queue.append({"type":"voice_tts","text":"市场调研报告已生成，保存在 output 文件夹"})
+                            except Exception as _ge:
+                                ws_server.command_queue.append({"type":"card_show","title":"❌ 报告失败","lines":[f"错误: {str(_ge)[:80]}"],"card_type":"todo"})
+                                ws_server.command_queue.append({"type":"voice_tts","text":f"报告生成失败"})
+                        import threading as _th
+                        _th.Thread(target=_gen_report, args=(txt,), daemon=True).start()
+                        _skill_result = "报告已开始生成，请稍等"
+
+                    elif _intent == "meeting":
+                        _sys = "你是小Q桌面助手。用户要求生成会议纪要，回复告诉用户正在处理中，请稍等。"
+                        def _gen_meeting(txt_orig):
+                            import subprocess as _sp, os as _os, json as _js, time as _tm, math as _math, base64 as _b64, urllib.request as _ur
+                            try:
+                                # 读配置
+                                _cfg_file = _os.path.expanduser("~/.hermes/skills/shared-folder/config.json")
+                                if not _os.path.exists(_cfg_file):
+                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 配置错误","lines":["共享文件夹未配置"],"card_type":"todo"})
+                                    ws_server.command_queue.append({"type":"voice_tts","text":"共享文件夹未配置"})
+                                    return
+                                _cfg = _js.load(open(_cfg_file))
+                                _user, _host, _path = _cfg["user"], _cfg["host"], _cfg["path"]
+                                # 找音频文件
+                                _r_ls = _sp.run(["ssh","-o","ConnectTimeout=5",f"{_user}@{_host}","ls","-1",f"{_path}/input/"],
+                                    capture_output=True, text=True, timeout=10)
+                                _audio_exts = [".m4a",".mp3",".wav",".aac",".ogg",".wma"]
+                                _audio_files = [l.strip() for l in _r_ls.stdout.split("\n") if l.strip()
+                                    and not l.startswith("total") and any(l.lower().endswith(e) for e in _audio_exts)]
+                                if not _audio_files:
+                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 没有音频文件","lines":["input/ 中没有找到音频文件","支持: m4a/mp3/wav/aac/ogg"],"card_type":"todo"})
+                                    ws_server.command_queue.append({"type":"voice_tts","text":"输入文件夹没有找到音频文件"})
+                                    return
+                                # 复制第一个音频到 Pi
+                                _af = _audio_files[0]
+                                _local_path = f"/tmp/meeting_input{_os.path.splitext(_af)[1]}"
+                                _sp.run(["scp","-o","ConnectTimeout=10",f"{_user}@{_host}:{_path}/input/{_af}",_local_path],
+                                    capture_output=True, text=True, timeout=120)
+                                # 转 WAV 16kHz mono
+                                _sp.run(["ffmpeg","-y","-i",_local_path,"-ac","1","-ar","16000","/tmp/meeting_full.wav"],
+                                    capture_output=True, text=True, timeout=120)
+                                # 获取时长
+                                _dur_r = _sp.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1","/tmp/meeting_full.wav"],
+                                    capture_output=True, text=True, timeout=10)
+                                _total_s = float(_dur_r.stdout.strip())
+                                # MiMo ASR key
+                                _asr_key = "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4"
+                                _asr_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+                                # 分 60秒一段处理
+                                _chunk_s = 60
+                                _n = max(1, int(_math.ceil(_total_s / _chunk_s)))
+                                ws_server.command_queue.append({"type":"voice_tts","text":f"找到音频文件，约{int(_total_s/60)}分钟，开始转写"})
+                                _all_text = []
+                                for _ci in range(_n):
+                                    _cs = _ci * _chunk_s
+                                    _cf = f"/tmp/meeting_chunk_{_ci:03d}.wav"
+                                    _sp.run(["ffmpeg","-y","-i","/tmp/meeting_full.wav","-ss",str(_cs),"-t",str(_chunk_s),"-ac","1","-ar","16000",_cf],
+                                        capture_output=True, text=True, timeout=30)
+                                    with open(_cf,"rb") as _wf:
+                                        _b64_data = _b64.b64encode(_wf.read()).decode('ascii')
+                                    _os.remove(_cf)
+                                    _body = _js.dumps({
+                                        "model":"mimo-v2.5-asr",
+                                        "messages":[
+                                            {"role":"system","content":"请将以下语音转写成文字。"},
+                                            {"role":"user","content":[{"type":"input_audio","input_audio":{"data":f"data:audio/wav;base64,{_b64_data}"}}]}
+                                        ],
+                                        "stream":False
+                                    }).encode()
+                                    _req = _ur.Request(_asr_url,data=_body,headers={"Content-Type":"application/json","api-key":_asr_key})
+                                    try:
+                                        with _ur.urlopen(_req,timeout=120) as _resp:
+                                            _rd = _js.loads(_resp.read())
+                                            _ct = _rd["choices"][0]["message"]["content"].strip()
+                                            if _ct:
+                                                _all_text.append(f"[{_cs//60}:{_cs%60:02d}] {_ct}")
+                                    except Exception as _ase:
+                                        print(f"[Meeting] ASR chunk {_ci} error: {_ase}")
+                                    _tm.sleep(0.3)
+                                # 转写完成，生成会议纪要
+                                _transcript = "\n\n".join(_all_text)
+                                # 取 DeepSeek key
+                                _key2 = os.environ.get("DEEPSEEK_API_KEY","")
+                                if not _key2:
+                                    _env = _os.path.expanduser("~/.hermes/.env")
+                                    if _os.path.exists(_env):
+                                        for _l in open(_env):
+                                            if _l.startswith("DEEPSEEK_API_KEY="):
+                                                _key2 = _l.strip().split("=",1)[1].strip("\"'")
+                                _prompt = f"""你是会议纪要助手。根据以下会议录音转写内容，生成结构化会议纪要。
+
+转写内容：
+{_transcript[:9000]}
+
+格式：
+# 会议纪要
+
+## 基本信息
+- 日期：
+- 议题：
+
+## 讨论内容
+
+## 决议事项
+
+## 待办事项
+
+## 备注"""
+                                _body2 = _js.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":_prompt}],"max_tokens":4096}).encode()
+                                _req2 = _ur.Request("https://api.deepseek.com/v1/chat/completions",data=_body2,
+                                    headers={"Content-Type":"application/json","Authorization":f"Bearer {_key2}"})
+                                with _ur.urlopen(_req2,timeout=300) as _resp2:
+                                    _report = _js.loads(_resp2.read())["choices"][0]["message"]["content"].strip()
+                                # 输出 MD + HTML + PDF
+                                _ts = _tm.strftime("%Y%m%d_%H%M%S")
+                                _md_name = f"会议纪要_{_ts}.md"
+                                _html_name = f"会议纪要_{_ts}.html"
+                                _pdf_name = f"会议纪要_{_ts}.pdf"
+                                _sp.run(["ssh",f"{_user}@{_host}","cat",">",f"{_path}/output/{_md_name}"],input=_report,text=True,timeout=30)
+                                # 转 HTML
+                                import markdown as _md
+                                _report_html = _md.markdown(_report,extensions=["fenced_code","tables"])
+                                _html_tpl = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>会议纪要</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; color: #1a1a2e; background: #f8f9fa; line-height: 1.8; }
+h1 { color: #16213e; border-bottom: 3px solid #0f3460; padding-bottom: 10px; }
+h2 { color: #0f3460; margin-top: 30px; border-left: 4px solid #e94560; padding-left: 12px; }
+h3 { color: #533483; }
+table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+th { background: #0f3460; color: white; padding: 10px; text-align: left; }
+td { border: 1px solid #ddd; padding: 10px; }
+tr:nth-child(even) { background: #f1f1f1; }
+pre { background: #1a1a2e; color: #e0e0e0; padding: 15px; border-radius: 6px; overflow-x: auto; }
+blockquote { border-left: 4px solid #e94560; margin: 15px 0; padding: 10px 20px; background: #f1f1f1; }
+</style></head><body>
+__REPORT_CONTENT__</body></html>"""
+                                _html = _html_tpl.replace("__REPORT_CONTENT__",_report_html)
+                                _sp.run(["ssh",f"{_user}@{_host}","cat",">",f"{_path}/output/{_html_name}"],input=_html,text=True,timeout=30)
+                                # PDF
+                                import weasyprint
+                                _pdf_bytes = weasyprint.HTML(string=_html).write_pdf()
+                                _tmp_pdf = f"/tmp/{_pdf_name}"
+                                with open(_tmp_pdf,"wb") as _pf: _pf.write(_pdf_bytes)
+                                _sp.run(["scp",_tmp_pdf,f"{_user}@{_host}:{_path}/output/{_pdf_name}"],capture_output=True,timeout=30)
+                                _os.remove(_tmp_pdf)
+                                # 清理临时文件
+                                for _f in ["/tmp/meeting_full.wav","/tmp/meeting_input*"]: _sp.run(["rm","-f",_f])
+                                ws_server.command_queue.append({"type":"card_show","title":"✅ 会议纪要完成","lines":["会议纪要已生成","格式: MD / HTML / PDF","保存在 output 文件夹"],"card_type":"todo","no_auto_close":True})
+                                ws_server.command_queue.append({"type":"voice_tts","text":"会议纪要已生成，保存在 output 文件夹"})
+                            except Exception as _ge:
+                                import traceback as _tb
+                                _tb.print_exc()
+                                ws_server.command_queue.append({"type":"card_show","title":"❌ 纪要生成失败","lines":[f"错误: {type(_ge).__name__}: {str(_ge)[:80]}"],"card_type":"todo"})
+                                ws_server.command_queue.append({"type":"voice_tts","text":"会议纪要生成失败"})
+                        import threading as _th
+                        _th.Thread(target=_gen_meeting, args=(txt,), daemon=True).start()
+                        _skill_result = "会议纪要正在生成，请稍等"
+
+                    elif _intent == "volume":
+                        _sys = "你是小Q桌面助手。用户调整音量后，回复确认当前音量百分比。"
+                        try:
+                            import subprocess as _sp, re as _re_vol
+                            _pct = None
+                            # 1) 阿拉伯数字: "30%", "30", "调到30%"
+                            _m = _re_vol.search(r"(\d+)\s*%|调到?\s*(\d+)", txt)
+                            if _m:
+                                _pct = int(_m.group(1) or _m.group(2))
+                            # 2) 中文数字: "百分之二十"
+                            if _pct is None:
+                                _cn = {"零":0,"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9,"十":10}
+                                _cm = _re_vol.search(r"百分之[\s]*(.+?)(?:[。，]|$)", txt)
+                                if _cm:
+                                    _cs = _cm.group(1).strip()
+                                    if len(_cs) == 1:
+                                        _pct = _cn.get(_cs, 5) * 10  # 二十→2→20, 三十→3→30
+                                    elif "十" in _cs:
+                                        _pts = _cs.split("十")
+                                        _t = _cn.get(_pts[0], 1) if _pts[0] else 1
+                                        _o = _cn.get(_pts[1], 0) if len(_pts) > 1 and _pts[1] else 0
+                                        _pct = _t * 10 + _o
+                                    else:
+                                        _pct = 50
+                            if _pct is not None:
+                                _pct = max(0, min(100, _pct))
+                                _val = int(_pct * 127 / 100)
+                                _sp.run(["amixer","-c","2","sset","PCM",str(_val)], capture_output=True, timeout=5)
+                                _sp.run(["amixer","-c","2","sset","HP",str(max(1,min(9,int(_pct*9/100))))], capture_output=True, timeout=5)
+                                _sp.run(["amixer","-c","2","sset","Line",str(max(1,min(9,int(_pct*9/100))))], capture_output=True, timeout=5)
+                                _sp.run(["sudo","alsactl","store"], capture_output=True, timeout=5)
+                                _skill_result = f"音量已设置为 {_pct}%"
+                            else:
+                                _cr = _sp.run(["amixer","-c","2","sget","PCM"], capture_output=True, text=True, timeout=5)
+                                _cm2 = _re_vol.search(r"Front Left:\s+Playback\s+(\d+)", _cr.stdout)
+                                if _cm2:
+                                    _cp = int(int(_cm2.group(1)) * 100 / 127)
+                                    _skill_result = f"当前音量 {_cp}%"
+                                else:
+                                    _skill_result = "音量查询失败"
+                        except Exception as _ve:
+                            print(f"[Volume] 错误: {_ve}")
+                            _skill_result = "音量调节失败"
 
                     else:  # chat / 未匹配
                         _skill_result = ""
@@ -4271,12 +4593,12 @@ class VoiceManager:
                     _body = _j.dumps({
                         "model": "deepseek-chat",
                         "messages": _messages,
-                        "max_tokens": 300,
+                        "max_tokens": 4096,
                     }).encode()
                     _r = _req.post("https://api.deepseek.com/v1/chat/completions",
                         data=_body,
                         headers={"Content-Type":"application/json","Authorization":f"Bearer {_key}"},
-                        timeout=30
+                        timeout=300
                     )
                     if _r.status_code == 200:
                         reply = _r.json()["choices"][0]["message"]["content"].strip()
@@ -4330,7 +4652,7 @@ class VoiceManager:
             DON = os.path.expanduser('~/.hermes/skills/pi-todo/done.py')
             DEL = os.path.expanduser('~/.hermes/skills/pi-todo/delete.py')
             QR  = os.path.expanduser('~/.hermes/skills/pi-todo/query.py')
-            TF  = os.path.expanduser('~/Little_Q_new/pi_reference_exp/data/todos.json')
+            TF  = os.path.expanduser('~/xiaoq/data/todos.json')
             if a == 'add':
                 t = _act.get('text','')
                 if t:
@@ -4451,7 +4773,8 @@ class WSServer:
                 if npc_sm: npc_sm.idle_time = 0
             elif cmd_type == "card_show":
                 card_mgr.show(cmd.get("title", ""), cmd.get("lines", []),
-                            cmd.get("card_type", "dialog"))
+                            cmd.get("card_type", "todo"))
+                card_mgr._no_auto_close = cmd.get("no_auto_close", False)
             elif cmd_type == "card_hide":
                 card_mgr.hide()
             elif cmd_type == "auto":
