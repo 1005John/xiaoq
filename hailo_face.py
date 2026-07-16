@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from hailo_face_pipeline import HailoFacePipeline
 
-PAN_MIN, PAN_MAX = 70.0, 110.0
+PAN_MIN, PAN_MAX = 50.0, 130.0
 TILT_MIN, TILT_MAX = 138.0, 162.0
 PC, TC = 90.0, 150.0
 
@@ -119,8 +119,8 @@ class HailoFace:
                         target_pan = max(PAN_MIN, min(PAN_MAX, target_pan))
                         target_tilt = max(TILT_MIN, min(TILT_MAX, target_tilt))
                         # 渐进追踪
-                        cur_pan += (target_pan - cur_pan) * 0.35
-                        cur_tilt += (target_tilt - cur_tilt) * 0.35
+                        cur_pan += (target_pan - cur_pan) * 0.25
+                        cur_tilt += (target_tilt - cur_tilt) * 0.25
                         cur_pan = max(PAN_MIN, min(PAN_MAX, cur_pan))
                         cur_tilt = max(TILT_MIN, min(TILT_MAX, cur_tilt))
                         self.face_pan = cur_pan
@@ -156,6 +156,6 @@ class HailoFace:
         # 偏离画面中心 → 角度偏移
         dx = (cx - 0.5) / 0.5  # -1.0 ~ +1.0
         dy = (cy - 0.5) / 0.5
-        target_pan = PC - dx * 20   # max ±20°
+        target_pan = PC - dx * 15   # max ±20°
         target_tilt = TC + dy * 12  # max ±12° (垂直范围小)
         return target_pan, target_tilt

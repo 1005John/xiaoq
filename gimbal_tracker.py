@@ -191,5 +191,5 @@ class GimbalTracker:
 
         if self.gimbal:
             pan_int = int(round(current_pan))
-            tilt_int = int(round(current_tilt))
+            tilt_int = 143  # 固定Y轴测试
             self.gimbal.move_to(pan_int, tilt_int, time_ms=80, blocking=False)

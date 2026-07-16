@@ -225,16 +225,16 @@ class CuteStyle:
     """可爱自信风全局配色"""
     BG_COLOR = (240, 208, 192)
     BG_WARM = (245, 218, 202)
-    FACE_SKIN = (245, 204, 183)
-    FACE_SHADOW = (225, 184, 163)
+    FACE_SKIN = (255, 228, 196)
+    FACE_SHADOW = (245, 210, 180)
     EYE_WHITE = (255, 255, 255, 230)
     EYE_OUTLINE = (80, 70, 65)
-    PUPIL_COLOR = (78, 36, 22)
+    PUPIL_COLOR = (25, 22, 20)
     PUPIL_HIGHLIGHT = (255, 255, 255)
     BROW_COLOR = (55, 48, 42)
     MOUTH_COLOR = (195, 105, 100)
     MOUTH_INNER = (220, 130, 125)
-    BLUSH_COLOR = (193, 77, 51)
+    BLUSH_COLOR = (235, 105, 100)
     MOOD_GLOW = {
         "idle": (255, 240, 220), "happy": (255, 220, 180),
         "love": (255, 190, 200), "sad": (200, 210, 240),
@@ -473,7 +473,7 @@ EXPRESSION_GIMBAL = {
 # ═══ 可爱风表情参数预设 ═══
 CUTE_IDLE_P     = P(0.90, 0.90, 1.00, 1.00,  0,  0, 0.00, 0.00, 1.00, 0.80, -2, -2, 0.55)
 
-CUTE_HAPPY      = P(0.05, 0.05, 1.12, 1.12, -3, -3, 0.20, 0.20, 1.20, 1.00, -8, -8, 0.75)
+CUTE_HAPPY      = P(1.05, 1.05, 1.12, 1.12, -3, -3, 0.20, 0.20, 1.20, 1.00, -8, -8, 0.75)
 CUTE_LAUGH      = P(0.40, 0.40, 1.15, 1.15,  0,  0, 0.75, 0.75, 1.10, 0.90, -9, -9, 0.55)
 CUTE_EXCITED    = P(1.20, 1.20, 1.20, 1.20, -5, -5, 0.00, 0.00, 1.40, 1.00, -10, -10, 0.55)
 CUTE_SMILE      = P(0.70, 0.70, 1.08, 1.08,  0,  0, 0.50, 0.50, 1.15, 0.85, -5, -5, 0.55)
@@ -481,7 +481,7 @@ CUTE_RELAXED    = P(0.65, 0.65, 1.00, 1.00,  0,  0, 0.00, 0.00, 0.90, 0.50,  0, 
 CUTE_ANGRY      = P(0.60, 0.60, 0.90, 0.90,  4,  4, 0.00, 0.00, 0.60, 0.30,  6,  6, 0.55)
 CUTE_SAD        = P(0.45, 0.45, 0.95, 0.95,  5,  5, 0.00, 0.00, 0.70, 0.30, 10, 10, 0.00)
 CUTE_SCARED     = P(1.30, 0.90, 0.95, 1.20, -7, -3, 0.00, 0.00, 0.60, 0.40, -5,  7, 0.55)
-CUTE_SLEEPY     = P(0.05, 0.05, 0.85, 0.85,  0,  0, 0.00, 0.00, 1.00, 0.05,  2,  2, 0.00)
+CUTE_SLEEPY     = P(0.08, 0.08, 0.85, 0.85,  0,  0, 0.00, 0.00, 1.00, 0.05,  2,  2, 0.00)
 CUTE_DEEP_SLEEP = P(0.00, 0.00, 0.85, 0.85,  0,  0, 0.00, 0.00, 1.00, 0.00,  2,  2, 0.00)
 CUTE_BORED      = P(0.40, 0.60, 0.95, 0.85,  3,  0, 0.00, 0.00, 0.80, 0.30,  3, -1, 0.55)
 CUTE_SURPRISE   = P(1.40, 1.40, 1.05, 1.05, -6, -6, 0.00, 0.00, 0.50, 0.90, -12, -12, 0.55)
@@ -3087,6 +3087,91 @@ class Renderer:
         card.blit(hs, (cw - hs.get_width() - 15, ch - 24))
         self.screen.blit(card, (cx, cy))
 
+    def draw_dialog_card(self, title, lines, alpha=1.0):
+        """对话回复卡片 — 眼底配色 + 再大20%"""
+    def draw_dialog_card(self, title, lines, alpha=1.0):
+        """半圆卡片 — 真椭圆半圆(无锯齿) + 高斯模糊 + 70%透明 + 文字居中"""
+        if alpha <= 0:
+            return
+        neon = self.get_neon_color() if hasattr(self, 'get_neon_color') else (80, 180, 255)
+        base_col = (25, 40, 70)  # 眼底基础蓝灰
+        neon = self.get_neon_color() if hasattr(self, 'get_neon_color') else (80, 180, 255)
+        # 最内层: 65%基础蓝灰 + 35%霓虹色, alpha=245(眼底中心透明度)
+        bg_r = int(base_col[0] * 0.65 + neon[0] * 0.35)
+        bg_g = int(base_col[1] * 0.65 + neon[1] * 0.35)
+        bg_b = int(base_col[2] * 0.65 + neon[2] * 0.35)
+        bg_a = int(245 * alpha)
+
+        cw, ch = WIDTH - 80, 340
+        cx, cy = 40, HEIGHT - ch
+
+        # 真半圆 + 高斯模糊
+        card = pygame.Surface((cw, ch), pygame.SRCALPHA)
+        pygame.draw.ellipse(card, (bg_r, bg_g, bg_b, bg_a), (0, -ch, cw, ch*2))
+
+        try:
+            card = pygame.transform.gaussian_blur(card, 3)
+        except AttributeError:
+            pass
+
+        # 装饰: 白色小圆点(透明度低, 隐约可见)
+        pygame.draw.circle(card, (255, 255, 255, int(60*alpha)), (30, 10), 4)
+        pygame.draw.circle(card, (255, 255, 255, int(60*alpha)), (cw-30, 10), 4)
+        # 底部小圆点
+        for edx in [cw//3, cw*2//3]:
+            pygame.draw.circle(card, (200, 210, 230, int(35*alpha)), (edx, ch-6), 2)
+
+        # 文字居中
+        y_pos = 30
+        tc = (235, 240, 250, min(240, int(220*alpha)))
+        for line in lines:
+            if y_pos > ch - 35:
+                break
+            if line.strip() == "":
+                y_pos += 10; continue
+            if any(ord(c) > 127 for c in line):
+                cur = ""
+                for ch_c in line.strip():
+                    test = cur + ch_c
+                    ts, _ = self.font_cn_b.render(test, tc)
+                    if ts.get_width() > cw - 80:
+                        if cur:
+                            ls, _ = self.font_cn_b.render(cur, tc)
+                            cx_t = (cw - ls.get_width()) // 2
+                            card.blit(ls, (cx_t, y_pos)); y_pos += 60
+                        cur = ch_c
+                    else:
+                        cur = test
+                if cur:
+                    ls, _ = self.font_cn_b.render(cur, tc)
+                    cx_t = (cw - ls.get_width()) // 2
+                    card.blit(ls, (cx_t, y_pos)); y_pos += 60
+            else:
+                cur = ""
+                for w in line.split(" "):
+                    test = cur + w + " "
+                    ts, _ = self.font_cn_b.render(test, tc)
+                    if ts.get_width() > cw - 80:
+                        if cur:
+                            ls, _ = self.font_cn_b.render(cur.strip(), tc)
+                            cx_t = (cw - ls.get_width()) // 2
+                            card.blit(ls, (cx_t, y_pos)); y_pos += 60
+                        cur = w + " "
+                    else:
+                        cur = test
+                if cur:
+                    ls, _ = self.font_cn_b.render(cur.strip(), tc)
+                    cx_t = (cw - ls.get_width()) // 2
+                    card.blit(ls, (cx_t, y_pos)); y_pos += 60
+
+        hs, _ = self.font_cn_h.render("点击关闭", (*neon, int(200*alpha)))
+        ch_x = (cw - hs.get_width()) // 2
+        card.blit(hs, (ch_x, ch - 32))
+        self.screen.blit(card, (cx, cy))
+
+
+
+# ═══ CuteRenderer — 可爱风渲染引擎 ═══
 class CuteRenderer:
     """可爱自信风渲染器"""
 
@@ -3095,8 +3180,8 @@ class CuteRenderer:
         self.face_center_x = WIDTH // 2
         self._current_expr = "idle"
         self.face_center_y = HEIGHT // 2 + 20
-        self.eye_rx = 135; self.eye_ry = 168
-        self.eye_spacing = 320; self.eye_y_offset = -72
+        self.eye_rx = 90; self.eye_ry = 112
+        self.eye_spacing = 250; self.eye_y_offset = -42
         self.brow_y_offset = -240
         self.pupil_mode = "normal"; self._pupil_mode_timer = 0.0
         pygame.freetype.init()
@@ -3123,14 +3208,6 @@ class CuteRenderer:
         self.screen.fill(CuteStyle.BG_COLOR)
         if ambient_mgr and (perf is None or perf.enable_glow):
             ambient_mgr.draw_glow(self.screen, cx, cy)
-        # 先画眉毛（图层在眼睛下方）
-        if self._current_expr != "sleepy":
-            for side in [-1, 1]:
-                bry = state.brow_l if side < 0 else state.brow_r
-                bx = cx + side * self.eye_spacing * face_scale * body_scale_x
-                by = cy - (30 if self._current_expr == "surprised" else 0)
-                self._draw_eyebrow(bx, by, bry, face_scale, side, 1.0)
-        # 再画眼睛（图层在眉毛上方）
         for side in [-1, 1]:
             l_open = state.l_open if side < 0 else state.r_open
             l_w = state.l_w if side < 0 else state.r_w
@@ -3140,8 +3217,14 @@ class CuteRenderer:
             ex = cx + side * self.eye_spacing * face_scale * body_scale_x
             ey = cy + self.eye_y_offset * face_scale + l_y * face_scale
             px_shift = -6 * face_scale if self._current_expr == "look_left" else (6 * face_scale if self._current_expr == "look_right" else 0)
-            self._draw_eye(ex, ey, l_open, l_w, l_cut, pupil_sc, hl, px_shift, face_scale, side)
+            self._draw_eye(ex, ey, l_open, l_w, l_cut, pupil_sc, hl, px_shift, face_scale)
         if state.blush > 0.01: self._draw_blush(cx, cy, state.blush, face_scale)
+        if self._current_expr != "sleepy":
+            for side in [-1, 1]:
+                bry = state.brow_l if side < 0 else state.brow_r
+                bx = cx + side * self.eye_spacing * face_scale * body_scale_x
+                by = cy + self.brow_y_offset * face_scale
+                self._draw_eyebrow(bx, by, bry, face_scale, side)
         if ambient_mgr and (perf is None or perf.enable_dots):
             ambient_mgr.draw_particles(self.screen, half=(perf.dots_half if perf else False))
 
@@ -3151,75 +3234,34 @@ class CuteRenderer:
         for side in [-1, 1]:
             bx = cx + side * (self.eye_spacing + 203) * scale
             by = cy + (self.eye_y_offset + 196) * scale
-            brx = int(111 * scale); bry = int(52 * scale)  # 横轴+20
-            angle = 10 if side < 0 else 170  # 左30° 右150°
-            surf_size = max(brx, bry) * 2 + 16
-            surf = pygame.Surface((surf_size, surf_size), pygame.SRCALPHA)
-            cx_s, cy_s = surf_size // 2, surf_size // 2
-            pygame.draw.ellipse(surf, (*CuteStyle.BLUSH_COLOR, alpha),
-                              (cx_s - brx, cy_s - bry, brx * 2, bry * 2))
-            rotated = pygame.transform.rotate(surf, angle)
-            rr = rotated.get_rect(center=(bx, by))
-            self.screen.blit(rotated, rr)
+            brx = int(91 * scale); bry = int(52 * scale)
+            surf = pygame.Surface((brx * 2 + 8, bry * 2 + 8), pygame.SRCALPHA)
+            pygame.draw.ellipse(surf, (*CuteStyle.BLUSH_COLOR, alpha), (4, 4, brx * 2, bry * 2))
+            self.screen.blit(surf, (bx - brx - 4, by - bry - 4))
 
-    def _draw_eye(self, cx, cy, open_r, w_scale, cut, pupil_sc, hl, px_shift, face_scale, side=0):
+    def _draw_eye(self, cx, cy, open_r, w_scale, cut, pupil_sc, hl, px_shift, face_scale):
         bw = int(self.eye_rx * w_scale * face_scale)
         bh = int(self.eye_ry * max(0.01, open_r) * face_scale)
         px = cx + px_shift; py = cy
-        if self._current_expr in ("happy", "laugh", "excited") and open_r > 0.005:
-            # 直接切拱门：两端垂直向下，顶部弧线连接（底部不连接）
-            lw = max(10, int(22 * face_scale))
-            cx_adj = cx - side * 30
-            cy_adj = cy + (100 if self._current_expr == "happy" else 80)
-            arc_w = int(bw * 0.8)
-            drop = int(bw * 1.0)
-            # 左侧垂直线（从上到下）
-            pygame.draw.line(self.screen, CuteStyle.PUPIL_COLOR,
-                           (cx_adj - arc_w, cy_adj - drop),
-                           (cx_adj - arc_w, cy_adj), lw)
-            # 顶部弧线（从左到右，弧度向上）
-            pts = []
-            for i in range(24):
-                t = i / 23
-                px = cx_adj - arc_w + int(arc_w * 2 * t)
-                py = cy_adj - drop - int(drop * 0.3 * math.sin(t * math.pi))
-                pts.append((int(px), int(py)))
-            pygame.draw.lines(self.screen, CuteStyle.PUPIL_COLOR, False, pts, lw)
-            # 右侧垂直线（从上到下）
-            pygame.draw.line(self.screen, CuteStyle.PUPIL_COLOR,
-                           (cx_adj + arc_w, cy_adj - drop),
-                           (cx_adj + arc_w, cy_adj), lw)
-            return
         if bh < 10:
             lw = max(6, int(14 * face_scale))
-            if True:
-                # wink/blink：原始单线
-                pts = [(cx - bw + int(bw * 2 * (i / 11.0)), cy + int(math.sin((i / 11.0) * math.pi) * 2)) for i in range(12)]
-                pygame.draw.lines(self.screen, CuteStyle.PUPIL_COLOR, False, pts, lw)
-            return
+            pts = [(cx - bw + int(bw * 2 * (i / 11.0)), cy + int(math.sin((i / 11.0) * math.pi) * 2)) for i in range(12)]
+            pygame.draw.lines(self.screen, CuteStyle.PUPIL_COLOR, False, pts, lw); return
         cut_pixels = int(bh * cut * 2.0) if cut > 0.1 else 0
         if self.pupil_mode == "heart": self._draw_heart_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
         elif self.pupil_mode == "star": self._draw_star_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
-        ww = int(bw * 1.52); wh = int(bh * 1.04)  # 宽椭圆(80%)
+        ww = int(bw * 1.6); wh = int(bh * 1.6)
         pygame.draw.ellipse(self.screen, (250, 250, 250), (px - ww, py - wh, ww * 2, wh * 2))
-        pw = int(ww * 0.7); ph = int(wh * 0.7)  # 白圈70%比例
-        pygame.draw.ellipse(self.screen, CuteStyle.PUPIL_COLOR, (px - pw, py - ph, pw * 2, ph * 2))
+        pygame.draw.ellipse(self.screen, CuteStyle.PUPIL_COLOR, (px - bw, py - bh, bw * 2, bh * 2))
         if cut_pixels > 0:
             clip_y = py + bh - cut_pixels; clip_h = wh + cut_pixels + 8
             pygame.draw.rect(self.screen, CuteStyle.BG_COLOR, (px - ww - 4, clip_y, ww * 2 + 8, clip_h))
             arc_pts = [(px - bw + int(bw * 2 * (i / 20.0)), clip_y + int(math.sin((i / 20.0) * math.pi) * 4)) for i in range(21)]
             pygame.draw.lines(self.screen, CuteStyle.PUPIL_COLOR, False, arc_pts, 3)
         if open_r > 0.05 and hl > 0.05:
-            # 高光大小跟随眼睛比例
-            eye_ref = min(bw, bh)
-            # 主高光(左上，原4倍)
-            hr = max(3, int(eye_ref * 0.6 * hl))
+            hr = max(10, int(31 * hl * face_scale))
             hx = px - int(bw * 0.38); hy = py - int(bh * 0.40)
             pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (hx, hy), hr)
-            # 次高光(右下，原2倍)
-            hr2 = max(2, int(eye_ref * 0.3 * hl))
-            hx2 = px + int(bw * 0.25); hy2 = py + int(bh * 0.25)
-            pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (hx2, hy2), hr2)
 
     def _draw_heart_eye(self, cx, cy, bw, bh, cut_pixels, hl, face_scale):
         s = max(bw, bh); size = int(s * 0.85); surf_size = size * 3
@@ -3242,40 +3284,21 @@ class CuteRenderer:
         if hl > 0.05:
             pygame.draw.circle(self.screen, CuteStyle.PUPIL_HIGHLIGHT, (cx - int(size * 0.30), cy - int(size * 0.28)), max(6, int(17 * hl * face_scale)))
 
-    def _draw_eyebrow(self, cx, cy, brow_offset, face_scale, side, open_r=1.0):
-        # 眉毛：旋转椭圆，横轴跟白圈相切(45°/135°)
-        tilt = brow_offset * face_scale * 1.5
-        bw = int(self.eye_rx * face_scale)
-        bh = int(self.eye_ry * max(0.01, open_r) * face_scale)
-        ww = int(bw * 1.9)
-        wh = int(bh * 1.3)
-        gap = max(1, int(4 * face_scale))
-        # 椭圆尺寸：横轴=白圈弧长的一段，纵轴=横轴/4
-        major = int(ww * 0.55) + 20  # 横轴半长+50像素
-        minor = max(2, int(major // 3 * 0.96))  # 纵轴加粗20%
-        # 切点角度：左眼45°，右眼135°
-        if side < 0:
-            tangent_angle = 75.0
-        else:
-            tangent_angle = 105.0
-        # 切点在白圈边缘
-        t_rad = math.radians(tangent_angle)
-        tx = cx + int((ww + gap) * math.cos(t_rad))
-        ty = cy - int((wh + gap) * math.sin(t_rad)) + int(tilt)
-        # 椭圆中心：从切点沿法线方向(45°方向)偏移
-        center_offset = minor + gap
-        nx = tx + int(center_offset * math.cos(t_rad))
-        ny = ty - int(center_offset * math.sin(t_rad))
-        # 创建旋转椭圆
-        rot_deg = tangent_angle - 90  # 横轴沿45°/135°方向
-        surf_size = (major + minor) * 2 + 4
-        surf = pygame.Surface((surf_size, surf_size), pygame.SRCALPHA)
-        pygame.draw.ellipse(surf, (38, 26, 22),
-                          (surf_size//2 - major, surf_size//2 - minor,
-                           major * 2, minor * 2))
-        rotated = pygame.transform.rotate(surf, rot_deg)
-        rr = rotated.get_rect(center=(nx + side * 50, ny))
-        self.screen.blit(rotated, rr)
+    def _draw_eyebrow(self, cx, cy, brow_offset, face_scale, side):
+        blen = int(182 * face_scale); to = max(10, int(17 * face_scale)); ti = max(3, int(6 * face_scale))
+        tilt = brow_offset * face_scale * 1.5; half = blen // 2
+        inner_ext = int(blen * 0.35)  # 往中间多伸长35%
+        if side < 0: x1, y1 = cx - half, cy - int(28 * face_scale) + tilt; x2, y2 = cx + half + inner_ext, cy + int(7 * face_scale) - tilt * 0.5
+        else: x1, y1 = cx + half, cy - int(28 * face_scale) + tilt; x2, y2 = cx - half - inner_ext, cy + int(7 * face_scale) - tilt * 0.5
+        m = int(to + 5); sw = int(abs(x2 - x1) + m * 2 + 4); sh = int(abs(y2 - y1) + m * 2 + 4); cxs = sw // 2; cys = sh // 2
+        for ra, al in [(3.0, 15), (1.8, 45), (0.6, 150), (0, 255)]:
+            layer = pygame.Surface((sw, sh), pygame.SRCALPHA)
+            for i in range(30):
+                t = i / 29; sx = int((x1 + (x2 - x1) * t) - x1 + cxs); sy = int((y1 + (y2 - y1) * t) - y1 + cys)
+                sr = max(1, int(to + (ti - to) * t + ra))
+                pygame.draw.circle(layer, (*CuteStyle.BROW_COLOR, al), (sx, sy), sr)
+            self.screen.blit(layer, (x1 - cxs, y1 - cys))
+
     def draw_hud(self, info):
         try:
             for i, l in enumerate([
@@ -3294,7 +3317,7 @@ class CardManager:
         self.current_alpha = 0.0
         self.title = ""
         self.lines = []
-        self.card_type = "todo"  
+        self.card_type = "todo"  # "dialog" 或 "todo"
         self.face_scale = 1.0
         self.target_scale = 1.0
         self.face_offset_x = 0
@@ -3333,6 +3356,13 @@ class CardManager:
             self.target_offset_x = rx
             self.target_offset_y = ry
             self.target_spacing = 420 / 580.0
+        else:
+            # dialog: 眼睛上移给卡片留空间, 眼距不变
+            self.target_scale = 1.0
+            self.target_offset_x = 0
+            self.target_offset_y = -160  # 眼睛上移
+            self.target_spacing = 1.0
+
     def hide(self):
         self.target_alpha = 0.0
         self.current_alpha = 0.0  # 瞬间变为全透明
@@ -4074,49 +4104,9 @@ class VoiceManager:
 
         # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
-            # 意图匹配 + 数据加载
-            import os as _os1
-            _intent1 = "chat"
-            _skill_data = ""
-            _sys1 = "你是小Q桌面助手，用简洁口语回答。"
-            if any(w in txt for w in ["天气","温度","下雨","刮风","升温","降温","预报"]):
-                _intent1 = "weather"
-                try:
-                    _cd = _json.load(open(_os1.path.expanduser("~/xiaoq/data/weather_cache.json")))
-                    _d = _cd.get("data", _cd)
-                    _lines = [f"当前: 重庆 {_d.get('weather_desc','?')} {_d.get('temperature','?')}°C 湿度{_d.get('humidity','?')}%"]
-                    for f in _d.get("forecast", []):
-                        _lines.append(f"  {f['date']}: {f['weather_desc']} {f.get('temp_min','?')}~{f.get('temp_max','?')}°C")
-                    _skill_data = "天气数据：\n" + "\n".join(_lines)
-                except: pass
-            elif any(w in txt for w in ["新闻","消息","快讯","资讯","有什么新"]):
-                _intent1 = "news"
-                try:
-                    _cd = _json.load(open(_os1.path.expanduser("~/xiaoq/data/news_cache.json")))
-                    _items = _cd.get("data", _cd) if isinstance(_cd.get("data"), list) else _cd.get("items", _cd)
-                    if isinstance(_items, list) and _items:
-                        _skill_data = "新闻列表：\n" + "\n".join(f"{i+1}. {item.get('title','?')}" for i, item in enumerate(_items[:10]))
-                except: pass
-            elif any(w in txt for w in ["待办","todo","添加","完成","删除","我的任务","提醒我"]):
-                _intent1 = "todo"
-                _todo_path = _os1.path.expanduser("~/xiaoq/data/todos.json")
-                if _os1.path.exists(_todo_path):
-                    try:
-                        _items = _json.load(open(_todo_path))
-                        _active = [t for t in _items if not t.get("done") and not t.get("deleted")]
-                        if _active:
-                            _skill_data = "待办列表：\n" + "\n".join(f"{i+1}. {t.get('text','?')}" for i, t in enumerate(_active[:10]))
-                        else: _skill_data = "暂无待办"
-                    except: pass
-                _sys1 += " 如果用户要添加待办，回复末尾包含JSON: {\"action\":\"add\",\"text\":\"完整原文\"}。如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 {\"action\":\"delete\",\"index\":\"all\"}（删除全部）。"
-
-            if _skill_data:
-                _user_msg = f"数据：\n{_skill_data}\n\n用户问：{txt}\n\n请根据数据回答"
-            else:
-                _user_msg = txt
             _body = _json.dumps({
                 "model": "mimo-v2.5-pro",
-                "messages": [{"role": "system", "content": _sys1}, {"role": "user", "content": _user_msg}],
+                "messages": [{"role": "system", "content": "你是小Q桌面助手。涉及待办操作时回复末尾必须包含JSON: {\"action\":\"add\",\"text\":\"完整原文（包括时间）\"} {\"action\":\"query\"} {\"action\":\"done\",\"index\":N} {\"action\":\"delete\",\"index\":\"all\"}。必须包含。"}, {"role": "user", "content": txt}],
                 "max_tokens": 500,
             }, ensure_ascii=False).encode("utf-8")
             _req = _ur.Request(
@@ -4247,7 +4237,7 @@ class VoiceManager:
                         else:
                             _skill_result = "暂无待办"
                         # 待办操作仍需LLM输出JSON指令（添加/完成/删除）
-                        _sys += " 如果用户要添加待办，回复末尾包含JSON: {\"action\":\"add\",\"text\":\"完整原文\"}。如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 {\"action\":\"delete\",\"index\":\"all\"}（删除全部）。如果是查询，不要加JSON。"
+                        _sys += " 如果用户要添加/完成/删除待办，回复末尾必须包含JSON: {\"action\":\"add\",\"text\":\"完整原文（包括时间）\"} 或 {\"action\":\"done\",\"index\":N}。如果是查询，不要加JSON。"
 
                     elif _intent == "email":
                         try:
@@ -4658,16 +4648,16 @@ __REPORT_CONTENT__</body></html>"""
             except: pass
         if _act:
             a = _act.get('action','')
-            ADD = os.path.expanduser('~/xiaoq/hermes_skills/add.py')
-            DON = os.path.expanduser('~/xiaoq/hermes_skills/done.py')
-            DEL = os.path.expanduser('~/xiaoq/hermes_skills/delete.py')
-            QR  = os.path.expanduser('~/xiaoq/hermes_skills/query.py')
+            ADD = os.path.expanduser('~/.hermes/skills/pi-todo/add.py')
+            DON = os.path.expanduser('~/.hermes/skills/pi-todo/done.py')
+            DEL = os.path.expanduser('~/.hermes/skills/pi-todo/delete.py')
+            QR  = os.path.expanduser('~/.hermes/skills/pi-todo/query.py')
             TF  = os.path.expanduser('~/xiaoq/data/todos.json')
             if a == 'add':
                 t = _act.get('text','')
                 if t:
                     # 传原始ASR文本给add.py解析时间，再传LLM提取的任务文本
-                    r = _sp.run(['python3', ADD, t], capture_output=True, text=True, timeout=10)
+                    r = _sp.run(['python3', ADD, txt, t], capture_output=True, text=True, timeout=10)
                     reply = r.stdout.strip() or reply
             elif a == 'done':
                 r = _sp.run(['python3',DON,str(_act.get('index',1))], capture_output=True, text=True, timeout=10)
@@ -4871,7 +4861,7 @@ class WSServer:
                             with open("/tmp/reminder_debug.txt","a") as _f: _f.write(f"POPPED card_show: {_card_cmd}\n")
                             print(f"[WS] card_show lookahead: title={_card_cmd.get('title')}, lines={_card_cmd.get('lines')}")
                             card_mgr.show(_card_cmd.get("title", "提醒"), _card_cmd.get("lines", []),
-                                        _card_cmd.get("card_type", "todo"))
+                                        _card_cmd.get("card_type", "dialog"))
                             print(f"[WS] card_mgr.show() done, visible={card_mgr.visible}")
                             with open("/tmp/reminder_debug.txt","a") as _f: _f.write(f"SHOW done visible={card_mgr.visible}\n")
                     voice_mgr.state = "speaking"
@@ -4903,7 +4893,7 @@ os.environ['SDL_AUDIODRIVER'] = 'dummy'
 os.environ['AUDIODEV'] = '/dev/null'
 pygame.init()
 pygame.freetype.init()
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+screen = pygame.display.set_mode((WIDTH, HEIGHT), 0)
 pygame.display.set_caption("Robot Face v9 + NPC + VFX + Body + Eyes + Ambient")
 clock = pygame.time.Clock()
 
@@ -4930,6 +4920,17 @@ ws_server = WSServer()
 ws_server.start()
 voice_mgr = VoiceManager()
 
+# 启动待办提醒监视器
+try:
+    from hermes_skills.todo import set_reminder_callback, start_reminder_watcher
+    def _reminder_tts(text):
+        if ws_server:
+            ws_server.command_queue.append({"type": "voice_tts", "text": text})
+    set_reminder_callback(_reminder_tts)
+    start_reminder_watcher()
+    print("[Reminder] Watcher started via hermes_skills")
+except Exception as e:
+    print(f"[Reminder] Init error: {e}")
 
 # v6: 初始化素材加载器和特效管理器
 asset_loader = AssetLoader()
@@ -4991,7 +4992,6 @@ def _on_cute_expr_change(expr_name):
          'speaking': 'happy'}
     mood = m.get(expr_name)
     if mood: cute_ambient_mgr.set_mood(mood)
-    cute_renderer.set_expression(expr_name)
 
 sm_cute._on_expr_change = _on_cute_expr_change
 sm_cute._breath_params_cb = anim_director.get_breath_params
@@ -5333,10 +5333,14 @@ while running:
             lines = (voice_mgr.reply_text.split("\n") 
                     if "\n" in voice_mgr.reply_text 
                     else [voice_mgr.reply_text])
-            card_mgr.show("", lines, "todo")
+            card_mgr.show("", lines, "dialog")
     elif vs == "idle":
         if voice_mgr.reply_text:
             voice_mgr.reply_text = ""
+        if card_mgr.visible:
+            if card_mgr.card_type == "dialog":
+                card_mgr.hide()
+
     card_mgr.update(dt)
     if npc_enabled and npc_sm:
         if _is_sleeping: npc_sm._set_state(NPCState.SLEEP)
@@ -5389,9 +5393,12 @@ while running:
     if card_mgr.visible or card_mgr.current_alpha > 0.01:
         if card_mgr.card_type == "todo":
             renderer.draw_todo_card(card_mgr.title, card_mgr.lines, card_mgr.current_alpha)
+        else:
+            renderer.draw_dialog_card(card_mgr.title, card_mgr.lines, card_mgr.current_alpha)
+
     # 语音状态叠加层(永久显示)
     _vs = voice_mgr.state
-    _vcolor = (90, 80, 75)
+    _vcolor = (150, 150, 150)
     _vs_display = "SLEEP" if _is_sleeping else _vs.upper()
     _vlines = [f"🎤 {_vs_display} | 表情:{sm.active_expr}"]
     _sleep_timer += dt
@@ -5412,13 +5419,13 @@ while running:
         st = f'👁 P{fp:.0f} T{ft:.0f}' if fd else '🔍 扫描中...'
         _vlines[0] += f' | {st}' 
     if _vs == "listening":
-        _vcolor = (50, 130, 200)
+        _vcolor = (100, 200, 255)
     elif _vs == "thinking":
-        _vcolor = (160, 140, 40)
+        _vcolor = (200, 200, 100)
         if voice_mgr.asr_text:
             _vlines.append("📝 \"" + voice_mgr.asr_text + "\"")
     elif _vs == "speaking":
-        _vcolor = (40, 160, 80)
+        _vcolor = (100, 255, 150)
         if voice_mgr.asr_text:
             _vlines.append("📝 \"" + voice_mgr.asr_text + "\"")
     try:

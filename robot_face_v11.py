@@ -3568,6 +3568,7 @@ class VoiceManager:
         self.reply_text = ""
         self._lock = threading.Lock()
         self._pending = False  # 有待处理的语音
+        self._chat_history = []  # 会话历史 (最近N轮)
         self.asr_text = ""     # 最近一次ASR识别文字
         self._history = []     # 对话历史 [{role, content}, ...] 最多6条
 
@@ -3622,7 +3623,7 @@ class VoiceManager:
             _wav_b64 = _b64.b64encode(_wav_bytes).decode('ascii')
 
             _api_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
-            _api_key = "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4"
+            _api_key = os.environ.get("XIAOMI_MIMO_API_KEY", "")
 
             _body = _json.dumps({
                 "model": "mimo-v2.5-asr",
@@ -3706,7 +3707,7 @@ class VoiceManager:
                 data=_body,
                 headers={
                     "Content-Type": "application/json; charset=utf-8",
-                    "api-key": "tp-csixrqsn4m3s2bx0dzhrjj1mr0ufw8d5sk8fzhlre10ynct4",
+                    "api-key": os.environ.get("XIAOMI_MIMO_API_KEY", ""),
                 }
             )
 
@@ -3730,7 +3731,7 @@ class VoiceManager:
                     _wf.setnchannels(1); _wf.setsampwidth(2)
                     _wf.setframerate(24000)
                     _wf.writeframes(_audio_buf)
-                _sp.run(["aplay", "-q", "-D", "plughw:2,0", "/tmp/tts_out.wav"], timeout=30)
+                _sp.run(["aplay", "-q", "-D", "plughw:0,0", "/tmp/tts_out.wav"], timeout=30)
                 print(f"[TTS] Played {len(_audio_buf)//1024}KB")
 
         except Exception as e:
@@ -3850,10 +3851,9 @@ class VoiceManager:
             txt = correct(txt)
             t_asr_end = time.time()
 
-            # 直接调 Hermes Agent，由其内部自主判断意图、调用技能或纯聊天
-            # _call_hermes 内部已包含 TTS，所以这里不需要再调 TTS
+            # 新路由: LLM意图分类 → 快速路径/聊天/hermes
             self._pending = False
-            self._call_hermes(txt)
+            self._classify_and_route(txt)
             return
             # ── 原 L3 流程已跳过 ──
             intent = match_intent(txt)
@@ -4099,7 +4099,7 @@ class VoiceManager:
         try:
             _body = _json.dumps({
                 "model": "mimo-v2.5-pro",
-                "messages": [{"role": "system", "content": "你是小Q桌面助手。涉及待办操作时回复末尾必须包含JSON: {\"action\":\"add\",\"text\":\"用户原话\"} {\"action\":\"query\"} {\"action\":\"done\",\"index\":N} {\"action\":\"delete\",\"index\":\"all\"}。必须包含。"}, {"role": "user", "content": txt}],
+                "messages": [{"role": "system", "content": "你是小Q桌面助手。只有用户明确提到待办/提醒/todo时才在末尾加JSON action，普通聊天不加JSON。"}, {"role": "user", "content": txt}],
                 "max_tokens": 500,
             }, ensure_ascii=False).encode("utf-8")
             _req = _ur.Request(
@@ -4124,12 +4124,12 @@ class VoiceManager:
             HERMES_BIN = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/hermes")
             try:
                 result = subprocess.run(
-                    [HERMES_BIN, "chat", "-q", txt, "-Q", "--provider", "deepseek", "--source", "tool"],
+                    [HERMES_BIN, "chat", "-q", txt, "-Q", "--provider", "xiaomi", "--source", "tool"],
                     capture_output=True, text=True, timeout=120
                 )
                 out = result.stdout.strip()
                 if out:
-                    reply_lines = [l for l in out.split("\n") if l.strip() and not l.startswith("session_id:") and not l.startswith("⚠")]
+                    reply_lines = [l for l in out.split("\n") if l.strip() and not l.startswith("session_id:") and not l.startswith("⚠") and "Normalized" not in l]
                     reply = "\n".join(reply_lines) if reply_lines else out
                 else:
                     err = result.stderr.strip()[-200:] if result.stderr else ""
@@ -4178,7 +4178,9 @@ class VoiceManager:
                     r = _sp.run(['python3',DEL,str(idx)], capture_output=True, text=True, timeout=10)
                     reply = r.stdout.strip() or reply
             elif a == 'query':
-                _sp.run(['python3',QR], capture_output=True, text=True, timeout=20)
+                try:
+                    _sp.run(['python3',QR], capture_output=True, text=True, timeout=3)
+                except: pass
                 todos = _j2.loads(open(TF).read()) if os.path.exists(TF) else []
                 active = [t for t in todos if not t.get('done') and not t.get('deleted')]
                 ls = ['待办('+str(len(active))+'项):'] if active else ['暂无待办']
@@ -4220,6 +4222,312 @@ class VoiceManager:
         self.tts(voice_text,
                 on_start=lambda: setattr(self, 'state', 'speaking'),
                 on_end=lambda: setattr(self, 'state', 'idle'))
+
+
+
+    def _get_mimo_key(self):
+        """读取MiMo API Key"""
+        import os
+        key = os.environ.get("XIAOMI_MIMO_API_KEY", "")
+        if not key:
+            try:
+                with open(os.path.expanduser("~/.hermes/.env")) as f:
+                    for line in f:
+                        if line.startswith("XIAOMI_MIMO_API_KEY="):
+                            key = line.split("=", 1)[1].strip()
+                            break
+            except: pass
+        return key
+
+    # ═══ 新路由系统: LLM意图分类 → 快速路径/聊天/hermes ═══
+
+    def _classify_and_route(self, txt):
+        """LLM意图分类 + 路由: 天气/新闻/待办→缓存, 聊天→直接回复, 其他→hermes"""
+        import json as _json, urllib.request as _ur, time as _time
+
+        t0 = _time.time()
+        intent = "other"
+        reply = ""
+
+        # ── 调用LLM进行意图分类 + 获取回复 ──
+        _system_prompt = (
+            "你是小Q桌面助手。分析用户意图并回复。\n"
+            "严格按JSON格式返回: {\"intent\": \"xxx\", \"reply\": \"xxx\"}\n"
+            "intent取值:\n"
+            "- weather: 用户问天气/温度/下雨/穿衣\n"
+            "- news: 用户问新闻/资讯/热点\n"
+            "- todo_query: 用户查看待办/任务清单\n"
+            "- todo_action: 用户明确要添加/完成/删除待办，或设置提醒。reply必须是JSON: {\"action\":\"delete\",\"index\":\"all\"} 或 {\"action\":\"add\",\"text\":\"xxx\"} 或 {\"action\":\"done\",\"index\":N}。如果用户说\"删除这些/全部\"则index填\"all\"。如果不确定具体操作，intent改用chat。\n"
+            "- chat: 普通聊天/问候/闲聊\n"
+            "- other: 以上都不是(查灵畿/邮件/会议总结/复杂任务)\n"
+            "对于chat，reply直接给出口语化回复(50字以内)。\n"
+            "对于weather/news/todo_query，reply填\"\"即可。\n"
+            "对于todo_action，reply格式: {\"action\":\"add\",\"text\":\"xxx\",\"remind_at\":\"ISO时间\"} 或 {\"action\":\"done\",\"index\":N} 或 {\"action\":\"delete\",\"index\":N}\n"
+            "只返回JSON，不要其他文字。"
+        )
+
+        try:
+            # 构建带历史的消息列表
+            _messages = [{"role": "system", "content": _system_prompt}]
+            for h in self._chat_history[-6:]:  # 最近3轮
+                _messages.append(h)
+            _messages.append({"role": "user", "content": txt})
+
+            _body = _json.dumps({
+                "model": "mimo-v2.5-pro",
+                "messages": _messages,
+                "max_tokens": 1500,
+            }, ensure_ascii=False).encode("utf-8")
+            _req = _ur.Request(
+                "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+                data=_body,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Authorization": "Bearer " + self._get_mimo_key(),
+                },
+            )
+            with _ur.urlopen(_req, timeout=30) as _resp:
+                _data = _json.loads(_resp.read().decode("utf-8"))
+                raw = _data["choices"][0]["message"]["content"].strip()
+                # 推理模型可能把内容放在reasoning_content里
+                if not raw:
+                    raw = _data["choices"][0]["message"].get("reasoning_content", "").strip()
+                llm_ms = int((_time.time() - t0) * 1000)
+                print(f"[Classify] {llm_ms}ms, raw: {raw[:80]}")
+
+                # 解析JSON (可能被```包裹)
+                _json_str = raw
+                if "```" in raw:
+                    import re as _re
+                    _m = _re.search(r"```(?:json)?\s*(.+?)```", raw, _re.DOTALL)
+                    if _m: _json_str = _m.group(1).strip()
+                try:
+                    _parsed = _json.loads(_json_str)
+                    intent = _parsed.get("intent", "other")
+                    reply = _parsed.get("reply", "")
+                except:
+                    # JSON解析失败，当作chat处理
+                    print(f"[Classify] JSON parse failed, treating as chat")
+                    intent = "chat"
+                    reply = raw
+
+                # 保存会话历史
+                self._chat_history.append({"role": "user", "content": txt})
+                self._chat_history.append({"role": "assistant", "content": raw})
+                if len(self._chat_history) > 12:
+                    self._chat_history = self._chat_history[-12:]
+
+        except Exception as e:
+            print(f"[Classify] LLM failed: {e}, fallback to hermes")
+            intent = "other"
+
+        # ── 路由 ──
+        print(f"[Route] intent={intent}, reply={reply[:40] if reply else '(empty)'}")
+
+        if intent == "weather":
+            self._handle_weather()
+        elif intent == "news":
+            self._handle_news()
+        elif intent == "todo_query":
+            self._handle_todo_query()
+        elif intent == "todo_action":
+            self._handle_todo_action(reply)
+        elif intent == "chat":
+            self._handle_chat(reply)
+        else:
+            self._call_hermes(txt)
+
+    def _handle_weather(self):
+        """读取天气缓存 → 格式化 → TTS"""
+        import json as _json
+        cache_path = os.path.expanduser("~/xiaoq/data/weather_cache.json")
+        try:
+            with open(cache_path) as f:
+                cache = _json.load(f)
+            data = cache.get("data", {})
+            # 格式化天气信息
+            parts = []
+            city = data.get("city", "")
+            if city: parts.append(f"{city}天气")
+            if data.get("weather"): parts.append(data["weather"])
+            if data.get("temperature"): parts.append(f"温度{data['temperature']}")
+            if data.get("wind"): parts.append(data["wind"])
+            if data.get("humidity"): parts.append(f"湿度{data['humidity']}")
+            reply = "，".join(parts) if parts else "天气数据暂未更新"
+            # 提示缓存时间
+            ts = cache.get("timestamp", 0)
+            age_min = int((time.time() - ts) / 60) if ts else 999
+            if age_min > 60:
+                reply += f"（{age_min}分钟前的数据）"
+        except Exception as e:
+            reply = f"天气数据读取失败: {e}"
+            print(f"[Weather] Error: {e}")
+
+        print(f"[Weather] {reply[:60]}")
+        self._show_card("天气", reply)
+        self.state = "speaking"
+        self.tts(reply, on_start=lambda: setattr(self, 'state', 'speaking'),
+                 on_end=lambda: setattr(self, 'state', 'idle'))
+
+    def _handle_news(self):
+        """读取新闻缓存 → 格式化 → TTS"""
+        import json as _json
+        cache_path = os.path.expanduser("~/xiaoq/data/news_cache.json")
+        try:
+            with open(cache_path) as f:
+                cache = _json.load(f)
+            items = cache.get("data", [])
+            if items:
+                parts = [f"今天有{len(items)}条新闻："]
+                for i, item in enumerate(items[:5], 1):
+                    title = item.get("title", "") if isinstance(item, dict) else str(item)
+                    parts.append(f"{i}. {title}")
+                reply = "。".join(parts)
+            else:
+                reply = "暂无新闻"
+            ts = cache.get("timestamp", 0)
+            age_min = int((time.time() - ts) / 60) if ts else 999
+            if age_min > 60:
+                reply += f"（{age_min}分钟前的数据）"
+        except Exception as e:
+            reply = f"新闻数据读取失败: {e}"
+            print(f"[News] Error: {e}")
+
+        print(f"[News] {reply[:60]}")
+        self._show_card("新闻", reply)
+        self.state = "speaking"
+        self.tts(reply, on_start=lambda: setattr(self, 'state', 'speaking'),
+                 on_end=lambda: setattr(self, 'state', 'idle'))
+
+    def _handle_todo_query(self):
+        """读取本地待办 → 格式化 → TTS"""
+        import json as _json
+        tf = os.path.expanduser("~/xiaoq/data/todos.json")
+        try:
+            todos = _json.loads(open(tf).read()) if os.path.exists(tf) else []
+            active = [t for t in todos if not t.get("done") and not t.get("deleted")]
+            if active:
+                parts = [f"你有{len(active)}项待办："]
+                for i, t in enumerate(active, 1):
+                    remind = f"，提醒{t.get('remind_text','')}" if t.get("remind_at") else ""
+                    parts.append(f"{i}. {t.get('text','')}{remind}")
+                reply = "。".join(parts[:8])
+            else:
+                reply = "暂无待办事项"
+        except Exception as e:
+            reply = f"待办读取失败: {e}"
+            print(f"[Todo] Error: {e}")
+
+        print(f"[Todo] {reply[:60]}")
+        self._show_card("待办", reply)
+        self.state = "speaking"
+        self.tts(reply, on_start=lambda: setattr(self, 'state', 'speaking'),
+                 on_end=lambda: setattr(self, 'state', 'idle'))
+
+    def _handle_todo_action(self, action_json):
+        """执行待办操作(add/done/delete) → TTS"""
+        import json as _json, subprocess as _sp
+        try:
+            act = _json.loads(action_json) if isinstance(action_json, str) else action_json
+        except:
+            # LLM返回的不是JSON，可能是澄清问题，直接当聊天回复
+            if action_json and len(action_json) > 2:
+                self._handle_chat(action_json)
+            else:
+                self._handle_chat("请告诉我具体操作")
+            return
+
+        a = act.get("action", "")
+        ADD = os.path.expanduser("~/xiaoq/skills/todo.py")
+        TF = os.path.expanduser("~/xiaoq/data/todos.json")
+        reply = ""
+
+        try:
+            if a == "add":
+                from skills.todo import TodoSkill, parse_remind_time
+                todo = TodoSkill()
+                text = act.get("text", "")
+                remind_at = act.get("remind_at")
+                remind_text = ""
+                # 如果LLM没解析时间，尝试从原文解析
+                if not remind_at and text:
+                    remind_at, remind_text = parse_remind_time(text)
+                result = todo.add(text, remind_at=remind_at, remind_text=remind_text)
+                if remind_at:
+                    reply = f"已添加待办：{text}，提醒时间{remind_text or remind_at}"
+                else:
+                    reply = f"已添加待办：{text}"
+                print(f"[Todo] add: {text}, remind={remind_at}")
+
+            elif a == "done":
+                idx = act.get("index", 1)
+                if os.path.exists(TF):
+                    todos = _json.loads(open(TF).read())
+                    active = [t for t in todos if not t.get("done") and not t.get("deleted")]
+                    if 0 < idx <= len(active):
+                        target = active[idx - 1]
+                        target["done"] = True
+                        _json.dump(todos, open(TF, "w"), ensure_ascii=False, indent=2)
+                        reply = f"已完成：{target.get('text','')}"
+                    else:
+                        reply = f"第{idx}个待办不存在"
+                else:
+                    reply = "暂无待办"
+
+            elif a == "delete":
+                idx = act.get("index", 1)
+                if os.path.exists(TF):
+                    todos = _json.loads(open(TF).read())
+                    active = [t for t in todos if not t.get("done") and not t.get("deleted")]
+                    if str(idx) == "all":
+                        count = 0
+                        for t in todos:
+                            if not t.get("done") and not t.get("deleted"):
+                                t["done"] = True; t["deleted"] = True; count += 1
+                        _json.dump(todos, open(TF, "w"), ensure_ascii=False, indent=2)
+                        reply = f"已删除{count}项待办"
+                    elif 0 < idx <= len(active):
+                        target = active[idx - 1]
+                        target["done"] = True; target["deleted"] = True
+                        _json.dump(todos, open(TF, "w"), ensure_ascii=False, indent=2)
+                        reply = f"已删除：{target.get('text','')}"
+                    else:
+                        reply = f"第{idx}个待办不存在"
+                else:
+                    reply = "暂无待办"
+            else:
+                reply = "未知的待办操作"
+
+        except Exception as e:
+            reply = f"待办操作失败: {e}"
+            print(f"[Todo] Error: {e}")
+
+        print(f"[Todo] {a}: {reply[:60]}")
+        self._show_card("待办", reply)
+        self.state = "speaking"
+        self.tts(reply, on_start=lambda: setattr(self, 'state', 'speaking'),
+                 on_end=lambda: setattr(self, 'state', 'idle'))
+
+    def _handle_chat(self, reply):
+        """纯聊天: 直接用LLM回复 → TTS"""
+        if not reply:
+            reply = "嗯？"
+        print(f"[Chat] {reply[:60]}")
+        self._show_card("回复", reply)
+        self.state = "speaking"
+        self.tts(reply, on_start=lambda: setattr(self, 'state', 'speaking'),
+                 on_end=lambda: setattr(self, 'state', 'idle'))
+
+    def _show_card(self, title, reply):
+        """显示回复卡片"""
+        try:
+            card_lines = [l.strip() for l in reply.split("\n") if l.strip()]
+            cmd = {"type": "card_show", "title": title,
+                   "lines": card_lines if card_lines else [reply], "card_type": "todo"}
+            if ws_server:
+                ws_server.command_queue.append(cmd)
+        except Exception as e:
+            print(f"[Card] Error: {e}")
 
 
     def quit(self):
@@ -4505,7 +4813,7 @@ data_collector.start()
 # ── 后台待办提醒监视器 ──
 from skills.todo import TodoSkill, ReminderWatcher
 _todo_for_reminder = TodoSkill()
-def _remind_callback(text):
+def _remind_callback(text, item=None):
     try:
         ws_server.command_queue.append({"type": "voice_tts", "text": text})
     except:

@@ -7,3 +7,6 @@ data/*_cache.json
 .env
 *.swp
 .DS_Store
+data/todos.json
+*.bak
+*.bak_*

@@ -24,6 +24,7 @@ class GimbalController:
         self.pan_id = pan_id
         self.tilt_id = tilt_id
         self.ser = None
+        self.locked_tilt = None  # 设为角度值后，所有 move_to 的 tilt 都用此值
     
     def connect(self):
         try:
@@ -64,6 +65,8 @@ class GimbalController:
     
     def move_to(self, pan_angle, tilt_angle, time_ms=1000, blocking=True):
         """移动舵机，blocking=False 时只发送指令不阻塞（适合动画循环中使用）"""
+        if self.locked_tilt is not None:
+            tilt_angle = self.locked_tilt
         p1 = self.angle_to_pos(pan_angle)
         p2 = self.angle_to_pos(tilt_angle)
         self._send(f'#{self.pan_id:03d}P{p1}T{time_ms}!#{self.tilt_id:03d}P{p2}T{time_ms}!')
