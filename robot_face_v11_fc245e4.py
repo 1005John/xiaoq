@@ -38,6 +38,19 @@ logging.basicConfig(level=logging.INFO, handlers=[_log_fh], format="%(asctime)s 
 log = logging.getLogger("v10")
 
 
+def _get_mimo_api_key():
+    """Load the MiMo key from the environment or Hermes desktop config."""
+    key = os.environ.get("XIAOMI_MIMO_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        config_path = os.path.expanduser("~/.hermes/hermes-desktop-assistant/config.json")
+        with open(config_path, encoding="utf-8") as config_file:
+            return json.load(config_file).get("aliyun_api_key", "").strip()
+    except Exception:
+        return ""
+
+
 # ── 配置 ──
 WIDTH, HEIGHT = 1280, 720
 FPS = 30
@@ -3310,6 +3323,11 @@ class CardManager:
         self.scroll_delay = 3.0      # 等待3秒开始滚动
         self._row_h = 64             # 行高(与draw_todo_card对齐)
         self._wrapped_lines = None   # 预换行缓存
+        self._tts_was_active = False
+        self._tts_done_timer = 0.0
+        self._tts_ready = False
+        self._scroll_done_timer = 0.0
+        self._scroll_ready = False
     def show(self, title, lines, card_type="todo"):
         self.visible = True
         self.title = title
@@ -3324,6 +3342,10 @@ class CardManager:
         self._display_timer = 0.0
         self._scroll_done_timer = 0.0
         self._close_timer = 0.0    # 重置自动关闭计时器
+        self._tts_was_active = False
+        self._tts_done_timer = 0.0
+        self._tts_ready = False
+        self._scroll_ready = False
         self._no_auto_close = False  # 默认允许自动关闭
         if card_type == "todo":
             # todo: 脸缩小并随机偏移 + 眼距缩小
@@ -3355,19 +3377,6 @@ class CardManager:
         self.face_offset_x += (self.target_offset_x - self.face_offset_x) * speed
         self.face_offset_y += (self.target_offset_y - self.face_offset_y) * speed
         self.spacing_scale += (self.target_spacing - self.spacing_scale) * speed
-        # ── 自动关闭 ──
-        if self.visible and not self._no_auto_close:
-            has_scroll = self.max_scroll > 0
-            try:
-                if voice_mgr.state == "speaking": self._tts_was_active = True
-                elif getattr(self, "_tts_was_active", False):
-                    self._display_timer += dt
-                    if self._display_timer >= 5.0:
-                        self.hide()
-                        self._tts_was_active = False
-            except: pass
-            if has_scroll:
-                pass
         # ── 垂直滚动 (todo卡片) ──
         if self.card_type == "todo" and self.visible and self.lines:
             cw, ch = 910, 500
@@ -3384,7 +3393,32 @@ class CardManager:
                         self.scroll_y = self.max_scroll
                         self._scroll_done_timer += dt
                         if self._scroll_done_timer >= 5.0:
-                            self.hide()
+                            self._scroll_ready = True
+                    else:
+                        self._scroll_done_timer = 0.0
+                        self._scroll_ready = False
+            else:
+                # 没有可滚动内容时，视为已经在底部，但仍等待5秒。
+                self._scroll_done_timer += dt
+                if self._scroll_done_timer >= 5.0:
+                    self._scroll_ready = True
+
+        # ── 自动关闭：TTS完成5秒 + 滚动到底部5秒，两个条件都满足 ──
+        if self.visible and not self._no_auto_close:
+            try:
+                if voice_mgr.state == "speaking":
+                    self._tts_was_active = True
+                    self._tts_done_timer = 0.0
+                    self._tts_ready = False
+                elif self._tts_was_active and not self._tts_ready:
+                    self._tts_done_timer += dt
+                    if self._tts_done_timer >= 5.0:
+                        self._tts_ready = True
+            except Exception:
+                pass
+
+            if self._tts_ready and self._scroll_ready:
+                self.hide()
 
 
 
@@ -3597,7 +3631,7 @@ class VoiceManager:
             _wav_b64 = _b64.b64encode(_wav_bytes).decode('ascii')
 
             _api_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
-            _api_key = os.environ.get("XIAOMI_MIMO_API_KEY", "")
+            _api_key = _get_mimo_api_key()
 
             _body = _json.dumps({
                 "model": "mimo-v2.5-asr",
@@ -3683,7 +3717,7 @@ class VoiceManager:
                 data=_body,
                 headers={
                     "Content-Type": "application/json; charset=utf-8",
-                    "api-key": os.environ.get("XIAOMI_MIMO_API_KEY", ""),
+                    "api-key": _get_mimo_api_key(),
                 }
             )
 
@@ -3707,7 +3741,7 @@ class VoiceManager:
                     _wf.setnchannels(1); _wf.setsampwidth(2)
                     _wf.setframerate(24000)
                     _wf.writeframes(_audio_buf)
-                _sp.run(["aplay", "-q", "-D", "plughw:2,0", "/tmp/tts_out.wav"], timeout=30)
+                _sp.run(["aplay", "-q", "-D", "plughw:CARD=seeed2micvoicec,DEV=0", "/tmp/tts_out.wav"], timeout=30)
                 print(f"[TTS] Played {len(_audio_buf)//1024}KB")
 
         except Exception as e:
@@ -3716,7 +3750,7 @@ class VoiceManager:
         print("[TTS] Done")
 
     def _call_llm_direct(self, prompt, is_context_prompt=False):
-        """调 DeepSeek v4-flash（直连，不经过本地代理）"""
+        """直连 MiMo（不经过本地代理）"""
         import time, requests, json as _llm_json, os as _llm_os
         
         t0 = time.time()
@@ -3727,19 +3761,19 @@ class VoiceManager:
                 _llm_os.path.join(_llm_os.path.dirname(__file__), "llm.json"),
             ]
             _llm_api_key = ""
-            _llm_base_url = "https://api.deepseek.com/v1"
+            _llm_base_url = "https://token-plan-cn.xiaomimimo.com/v1"
             for _p in _llm_cfg_paths:
                 if _llm_os.path.exists(_p):
                     try:
                         with open(_p) as _f:
                             _llm_data = _llm_json.load(_f)
                         _llm_api_key = _llm_data.get("llm", {}).get("api_key", "")
-                        _llm_base_url = _llm_data.get("llm", {}).get("base_url", "https://api.deepseek.com/v1")
+                        _llm_base_url = _llm_data.get("llm", {}).get("base_url", "https://token-plan-cn.xiaomimimo.com/v1")
                         break
                     except:
                         pass
             if not _llm_api_key:
-                _llm_api_key = _llm_os.environ.get("DEEPSEEK_API_KEY", "")
+                _llm_api_key = _llm_os.environ.get("XIAOMI_MIMO_API_KEY", "")
             
             messages = []
             if is_context_prompt:
@@ -4074,12 +4108,42 @@ class VoiceManager:
 
         # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
+            # 会议纪要需要本地文件任务和异步产物，跳过普通聊天接口，走下方技能分支。
+            if any(w in txt for w in ["生成会议纪要", "生成纪要", "整理会议纪要", "处理会议录音", "转写会议录音"]):
+                raise RuntimeError("meeting skill uses local task pipeline")
             # 意图匹配 + 数据加载
             import os as _os1
             _intent1 = "chat"
             _skill_data = ""
             _sys1 = "你是小Q桌面助手，用简洁口语回答。"
-            if any(w in txt for w in ["天气","温度","下雨","刮风","升温","降温","预报"]):
+            _meeting_query = (
+                ("会议纪要" in txt and any(w in txt for w in [
+                    "讨论", "内容", "决定", "待办", "总结", "说了什么", "提到", "安排", "结论",
+                ]))
+                or any(w in txt for w in [
+                    "会议纪要里", "纪要里", "会议讨论", "会议决定", "会议待办",
+                    "会议内容", "会议结论", "刚才会议", "上次会议", "这次会议",
+                ])
+            )
+            if _meeting_query:
+                _intent1 = "meeting_query"
+                _sys1 = "你是小Q会议助手。只能根据提供的会议纪要内容回答；找不到依据时明确说纪要中没有相关信息。回答简洁口语化。"
+                try:
+                    _meeting_output = _os1.path.expanduser("~/xiaoq/data/meetings/output")
+                    _meeting_files = sorted(
+                        [f for f in _os1.listdir(_meeting_output) if f.endswith(".md")],
+                        reverse=True,
+                    )
+                    if _meeting_files:
+                        _latest_path = _os1.path.join(_meeting_output, _meeting_files[0])
+                        with open(_latest_path, encoding="utf-8") as _meeting_file:
+                            _skill_data = "最新会议纪要：\n" + _meeting_file.read()[:12000]
+                    else:
+                        _skill_data = "暂无已生成的会议纪要"
+                except Exception as _meeting_err:
+                    print(f"[MeetingQuery] load failed: {_meeting_err}")
+                    _skill_data = "暂无可读取的会议纪要"
+            elif any(w in txt for w in ["天气","温度","下雨","刮风","升温","降温","预报"]):
                 _intent1 = "weather"
                 try:
                     _cd = _json.load(open(_os1.path.expanduser("~/xiaoq/data/weather_cache.json")))
@@ -4140,19 +4204,19 @@ class VoiceManager:
             try:
                 import requests as _req, json as _j, os as _o
                 # 从 .hermes/.env 读取 API Key
-                _key = _o.environ.get("DEEPSEEK_API_KEY", "")
+                _key = _o.environ.get("XIAOMI_MIMO_API_KEY", "")
                 if not _key:
                     _env_path = _o.path.expanduser("~/.hermes/.env")
                     if _o.path.exists(_env_path):
                         for _env_line in open(_env_path):
-                            if _env_line.startswith("DEEPSEEK_API_KEY="):
+                            if _env_line.startswith("XIAOMI_MIMO_API_KEY="):
                                 _key = _env_line.strip().split("=", 1)[1].strip("\"'")
                                 break
                 if not _key:
                     _cfg = _o.path.expanduser("~/.hermes/hermes-desktop-assistant/config.json")
                     if _o.path.exists(_cfg):
                         _d = _j.load(open(_cfg))
-                        _key = _d.get("deepseek_api_key", _d.get("aliyun_api_key", ""))
+                        _key = _d.get("xiaomi_mimo_api_key", _d.get("aliyun_api_key", ""))
                 if _key:
                     # ── 意图匹配 ──
                     _intent = "chat"  # default: 闲聊
@@ -4167,7 +4231,12 @@ class VoiceManager:
                         _intent = "email"
                     elif any(w in txt for w in ["市场分析","调研报告","市场调研","竞品分析","市场研究","市场报告"]):
                         _intent = "market"
-                    elif any(w in txt for w in ["会议纪要","生成纪要","会议记录","转录","转写"]):
+                    elif any(w in txt for w in [
+                        "会议纪要里", "纪要里", "会议讨论", "会议决定", "会议待办",
+                        "会议内容", "会议结论", "刚才会议", "上次会议", "这次会议",
+                    ]):
+                        _intent = "meeting_query"
+                    elif any(w in txt for w in ["生成会议纪要","生成纪要","整理会议纪要","处理会议录音","转写会议录音"]):
                         _intent = "meeting"
                     elif any(w in txt for w in ["音量"]):
                         _intent = "volume"
@@ -4254,7 +4323,7 @@ class VoiceManager:
                             import subprocess as _em_sp
                             _h = _o.path.expanduser("~/.local/bin/hermes")
                             _r = _em_sp.run(
-                                [_h, "--query", txt, "--skills", "pi-email", "--provider", "deepseek", "-t", "terminal,skills"],
+                                [_h, "--query", txt, "--skills", "pi-email", "--provider", "custom:xiaomi", "-t", "terminal,skills"],
                                 capture_output=True, text=True, timeout=120)
                             if _r.returncode == 0 and _r.stdout.strip():
                                 _lines = [l for l in _r.stdout.split("\n")
@@ -4306,13 +4375,13 @@ class VoiceManager:
                                         capture_output=True, text=True, timeout=30)
                                     if _r_cat.returncode == 0 and _r_cat.stdout.strip():
                                         _all_text += f"\n--- {_f} ---\n{_r_cat.stdout.strip()}\n"
-                                # 调用 DeepSeek 生成报告
-                                _key2 = os.environ.get("DEEPSEEK_API_KEY","")
+                                # 调用 MiMo 生成报告
+                                _key2 = os.environ.get("XIAOMI_MIMO_API_KEY","")
                                 if not _key2:
                                     _env = _os.path.expanduser("~/.hermes/.env")
                                     if _os.path.exists(_env):
                                         for _l in open(_env):
-                                            if _l.startswith("DEEPSEEK_API_KEY="):
+                                            if _l.startswith("XIAOMI_MIMO_API_KEY="):
                                                 _key2 = _l.strip().split("=",1)[1].strip("\"'")
                                 if not _key2:
                                     ws_server.command_queue.append({"type":"card_show","title":"❌ 配置错误","lines":["API密钥未配置"],"card_type":"todo"})
@@ -4335,11 +4404,11 @@ class VoiceManager:
 8. 结论与建议"""
                                 import urllib.request as _ur
                                 _body = _js.dumps({
-                                    "model":"deepseek-chat",
+                                    "model":"mimo-v2.5-pro",
                                     "messages":[{"role":"user","content":_prompt}],
                                     "max_tokens":4096,
                                 }).encode()
-                                _req = _ur.Request("https://api.deepseek.com/v1/chat/completions",
+                                _req = _ur.Request("https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
                                     data=_body,
                                     headers={"Content-Type":"application/json","Authorization":f"Bearer {_key2}"})
                                 with _ur.urlopen(_req, timeout=300) as _resp:
@@ -4394,34 +4463,61 @@ __REPORT_CONTENT__
                         _th.Thread(target=_gen_report, args=(txt,), daemon=True).start()
                         _skill_result = "报告已开始生成，请稍等"
 
+                    elif _intent == "meeting_query":
+                        _sys = "你是小Q会议助手，只能根据提供的会议纪要内容回答。找不到依据时明确说明。"
+                        try:
+                            _meeting_output = _o.path.expanduser("~/xiaoq/data/meetings/output")
+                            _meeting_files = sorted([f for f in _o.listdir(_meeting_output) if f.endswith(".md")], reverse=True)
+                            if _meeting_files:
+                                with open(_o.path.join(_meeting_output, _meeting_files[0]), encoding="utf-8") as _mf:
+                                    _skill_result = "最新会议纪要：\n" + _mf.read()[:12000]
+                            else:
+                                _skill_result = "暂无已生成的会议纪要"
+                        except Exception as _mqe:
+                            print(f"[MeetingQuery] load failed: {_mqe}")
+                            _skill_result = "暂无可读取的会议纪要"
+
                     elif _intent == "meeting":
                         _sys = "你是小Q桌面助手。用户要求生成会议纪要，回复告诉用户正在处理中，请稍等。"
                         def _gen_meeting(txt_orig):
                             import subprocess as _sp, os as _os, json as _js, time as _tm, math as _math, base64 as _b64, urllib.request as _ur
                             try:
-                                # 读配置
-                                _cfg_file = _os.path.expanduser("~/.hermes/skills/shared-folder/config.json")
-                                if not _os.path.exists(_cfg_file):
-                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 配置错误","lines":["共享文件夹未配置"],"card_type":"todo"})
-                                    ws_server.command_queue.append({"type":"voice_tts","text":"共享文件夹未配置"})
-                                    return
-                                _cfg = _js.load(open(_cfg_file))
-                                _user, _host, _path = _cfg["user"], _cfg["host"], _cfg["path"]
-                                # 找音频文件
-                                _r_ls = _sp.run(["ssh","-o","ConnectTimeout=5",f"{_user}@{_host}","ls","-1",f"{_path}/input/"],
-                                    capture_output=True, text=True, timeout=10)
                                 _audio_exts = [".m4a",".mp3",".wav",".aac",".ogg",".wma"]
-                                _audio_files = [l.strip() for l in _r_ls.stdout.split("\n") if l.strip()
-                                    and not l.startswith("total") and any(l.lower().endswith(e) for e in _audio_exts)]
+                                _meeting_root = _os.path.expanduser("~/xiaoq/data/meetings")
+                                _meeting_inbox = _os.path.join(_meeting_root, "inbox")
+                                _meeting_output = _os.path.join(_meeting_root, "output")
+                                _meeting_archive = _os.path.join(_meeting_root, "archive")
+                                for _d in (_meeting_inbox, _meeting_output, _meeting_archive):
+                                    _os.makedirs(_d, exist_ok=True)
+                                _local_audio = [f for f in _os.listdir(_meeting_inbox)
+                                    if any(f.lower().endswith(e) for e in _audio_exts)]
+                                _local_audio.sort(key=lambda f: _os.path.getmtime(_os.path.join(_meeting_inbox, f)), reverse=True)
+                                _local_mode = bool(_local_audio)
+                                if _local_mode:
+                                    _audio_files = _local_audio
+                                else:
+                                    # 兼容旧的远程共享目录
+                                    _cfg_file = _os.path.expanduser("~/.hermes/skills/shared-folder/config.json")
+                                    _audio_files = []
+                                    if _os.path.exists(_cfg_file):
+                                        _cfg = _js.load(open(_cfg_file))
+                                        _user, _host, _path = _cfg["user"], _cfg["host"], _cfg["path"]
+                                        _r_ls = _sp.run(["ssh","-o","ConnectTimeout=5",f"{_user}@{_host}","ls","-1",f"{_path}/input/"],
+                                            capture_output=True, text=True, timeout=10)
+                                        _audio_files = [l.strip() for l in _r_ls.stdout.split("\n") if l.strip()
+                                            and not l.startswith("total") and any(l.lower().endswith(e) for e in _audio_exts)]
                                 if not _audio_files:
-                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 没有音频文件","lines":["input/ 中没有找到音频文件","支持: m4a/mp3/wav/aac/ogg"],"card_type":"todo"})
+                                    ws_server.command_queue.append({"type":"card_show","title":"❌ 没有音频文件","lines":["会议收件箱中没有找到音频文件","支持: m4a/mp3/wav/aac/ogg"],"card_type":"todo"})
                                     ws_server.command_queue.append({"type":"voice_tts","text":"输入文件夹没有找到音频文件"})
                                     return
-                                # 复制第一个音频到 Pi
+                                # 本地上传直接使用；远程共享目录则先复制到临时目录
                                 _af = _audio_files[0]
-                                _local_path = f"/tmp/meeting_input{_os.path.splitext(_af)[1]}"
-                                _sp.run(["scp","-o","ConnectTimeout=10",f"{_user}@{_host}:{_path}/input/{_af}",_local_path],
-                                    capture_output=True, text=True, timeout=120)
+                                if _local_mode:
+                                    _local_path = _os.path.join(_meeting_inbox, _af)
+                                else:
+                                    _local_path = f"/tmp/meeting_input{_os.path.splitext(_af)[1]}"
+                                    _sp.run(["scp","-o","ConnectTimeout=10",f"{_user}@{_host}:{_path}/input/{_af}",_local_path],
+                                        capture_output=True, text=True, timeout=120)
                                 # 转 WAV 16kHz mono
                                 _sp.run(["ffmpeg","-y","-i",_local_path,"-ac","1","-ar","16000","/tmp/meeting_full.wav"],
                                     capture_output=True, text=True, timeout=120)
@@ -4430,7 +4526,7 @@ __REPORT_CONTENT__
                                     capture_output=True, text=True, timeout=10)
                                 _total_s = float(_dur_r.stdout.strip())
                                 # MiMo ASR key
-                                _asr_key = os.environ.get("XIAOMI_MIMO_API_KEY", "")
+                                _asr_key = _get_mimo_api_key()
                                 _asr_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
                                 # 分 60秒一段处理
                                 _chunk_s = 60
@@ -4465,14 +4561,6 @@ __REPORT_CONTENT__
                                     _tm.sleep(0.3)
                                 # 转写完成，生成会议纪要
                                 _transcript = "\n\n".join(_all_text)
-                                # 取 DeepSeek key
-                                _key2 = os.environ.get("DEEPSEEK_API_KEY","")
-                                if not _key2:
-                                    _env = _os.path.expanduser("~/.hermes/.env")
-                                    if _os.path.exists(_env):
-                                        for _l in open(_env):
-                                            if _l.startswith("DEEPSEEK_API_KEY="):
-                                                _key2 = _l.strip().split("=",1)[1].strip("\"'")
                                 _prompt = f"""你是会议纪要助手。根据以下会议录音转写内容，生成结构化会议纪要。
 
 转写内容：
@@ -4492,9 +4580,9 @@ __REPORT_CONTENT__
 ## 待办事项
 
 ## 备注"""
-                                _body2 = _js.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":_prompt}],"max_tokens":4096}).encode()
-                                _req2 = _ur.Request("https://api.deepseek.com/v1/chat/completions",data=_body2,
-                                    headers={"Content-Type":"application/json","Authorization":f"Bearer {_key2}"})
+                                _body2 = _js.dumps({"model":"mimo-v2.5-pro","messages":[{"role":"user","content":_prompt}],"max_tokens":4096}).encode()
+                                _req2 = _ur.Request("http://127.0.0.1:8086/v1/chat/completions",data=_body2,
+                                    headers={"Content-Type":"application/json","Authorization":"Bearer local-secret-2026"})
                                 with _ur.urlopen(_req2,timeout=300) as _resp2:
                                     _report = _js.loads(_resp2.read())["choices"][0]["message"]["content"].strip()
                                 # 输出 MD + HTML + PDF
@@ -4502,7 +4590,8 @@ __REPORT_CONTENT__
                                 _md_name = f"会议纪要_{_ts}.md"
                                 _html_name = f"会议纪要_{_ts}.html"
                                 _pdf_name = f"会议纪要_{_ts}.pdf"
-                                _sp.run(["ssh",f"{_user}@{_host}","cat",">",f"{_path}/output/{_md_name}"],input=_report,text=True,timeout=30)
+                                with open(_os.path.join(_meeting_output, _md_name), "w", encoding="utf-8") as _md_file:
+                                    _md_file.write(_report)
                                 # 转 HTML
                                 import markdown as _md
                                 _report_html = _md.markdown(_report,extensions=["fenced_code","tables"])
@@ -4522,18 +4611,21 @@ blockquote { border-left: 4px solid #e94560; margin: 15px 0; padding: 10px 20px;
 </style></head><body>
 __REPORT_CONTENT__</body></html>"""
                                 _html = _html_tpl.replace("__REPORT_CONTENT__",_report_html)
-                                _sp.run(["ssh",f"{_user}@{_host}","cat",">",f"{_path}/output/{_html_name}"],input=_html,text=True,timeout=30)
+                                with open(_os.path.join(_meeting_output, _html_name), "w", encoding="utf-8") as _html_file:
+                                    _html_file.write(_html)
                                 # PDF
                                 import weasyprint
                                 _pdf_bytes = weasyprint.HTML(string=_html).write_pdf()
                                 _tmp_pdf = f"/tmp/{_pdf_name}"
                                 with open(_tmp_pdf,"wb") as _pf: _pf.write(_pdf_bytes)
-                                _sp.run(["scp",_tmp_pdf,f"{_user}@{_host}:{_path}/output/{_pdf_name}"],capture_output=True,timeout=30)
+                                _sp.run(["cp", _tmp_pdf, _os.path.join(_meeting_output, _pdf_name)], capture_output=True, timeout=30)
                                 _os.remove(_tmp_pdf)
-                                # 清理临时文件
-                                for _f in ["/tmp/meeting_full.wav","/tmp/meeting_input*"]: _sp.run(["rm","-f",_f])
-                                ws_server.command_queue.append({"type":"card_show","title":"✅ 会议纪要完成","lines":["会议纪要已生成","格式: MD / HTML / PDF","保存在 output 文件夹"],"card_type":"todo","no_auto_close":True})
-                                ws_server.command_queue.append({"type":"voice_tts","text":"会议纪要已生成，保存在 output 文件夹"})
+                                _sp.run(["rm", "-f", "/tmp/meeting_full.wav", _local_path] if not _local_mode else ["rm", "-f", "/tmp/meeting_full.wav"], timeout=10)
+                                _archive_path = _os.path.join(_meeting_archive, _af)
+                                if _local_mode and _os.path.exists(_local_path):
+                                    _os.replace(_local_path, _archive_path)
+                                ws_server.command_queue.append({"type":"card_show","title":"✅ 会议纪要完成","lines":["会议纪要已生成", "格式: MD / HTML / PDF",f"文件位于 {_meeting_output}"],"card_type":"todo","no_auto_close":True})
+                                ws_server.command_queue.append({"type":"voice_tts","text":"会议纪要已生成，文件已保存到小Q的会议输出目录"})
                             except Exception as _ge:
                                 import traceback as _tb
                                 _tb.print_exc()
@@ -4601,11 +4693,11 @@ __REPORT_CONTENT__</body></html>"""
                     else:
                         _messages.append({"role":"user","content":txt})
                     _body = _j.dumps({
-                        "model": "deepseek-chat",
+                        "model": "mimo-v2.5-pro",
                         "messages": _messages,
                         "max_tokens": 4096,
                     }).encode()
-                    _r = _req.post("https://api.deepseek.com/v1/chat/completions",
+                    _r = _req.post("https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
                         data=_body,
                         headers={"Content-Type":"application/json","Authorization":f"Bearer {_key}"},
                         timeout=300
@@ -4629,7 +4721,7 @@ __REPORT_CONTENT__</body></html>"""
             HERMES_BIN = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/hermes")
             try:
                 result = subprocess.run(
-                    [HERMES_BIN, "chat", "-q", txt, "-Q", "--provider", "deepseek", "--source", "tool"],
+                    [HERMES_BIN, "chat", "-q", txt, "-Q", "--provider", "custom:xiaomi", "--source", "tool"],
                     capture_output=True, text=True, timeout=120
                 )
                 out = result.stdout.strip()

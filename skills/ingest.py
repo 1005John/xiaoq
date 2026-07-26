@@ -2,7 +2,7 @@
 skills/ingest.py — 邮件知识库增量更新技能
 
 语音触发拉取最新邮件并提炼入库。
-调用 ~/.hermes/skills/email/email-knowledge/ingest.py --since 2。
+调用 ~/.hermes/skills/email/email-knowledge/ingest.py --since 7。
 """
 
 import logging
@@ -15,7 +15,8 @@ from skills.base import Skill, SkillResult, SideEffect
 log = logging.getLogger("skills.ingest")
 
 INGEST_SCRIPT = "/home/johnf/.hermes/skills/email/email-knowledge/ingest.py"
-INGEST_TIMEOUT = 120
+# A multi-batch MiMo import can take several minutes on the Pi.
+INGEST_TIMEOUT = 900
 
 
 class IngestSkill(Skill):
@@ -27,10 +28,20 @@ class IngestSkill(Skill):
     def execute(self, params: dict = None) -> SkillResult:
         try:
             result = subprocess.run(
-                ["/usr/bin/python3", INGEST_SCRIPT, "--since", "2"],
+                ["/usr/bin/python3", INGEST_SCRIPT, "--since", "7"],
                 capture_output=True, text=True, timeout=INGEST_TIMEOUT,
             )
             output = result.stdout.strip()
+
+            if result.returncode != 0:
+                log.warning(
+                    "ingest failed: rc=%s stderr=%s",
+                    result.returncode, result.stderr.strip()[-500:],
+                )
+                return SkillResult(
+                    success=False,
+                    side_effects=[SideEffect("voice_tts", {"text": "邮件知识库更新失败，请稍后重试"})],
+                )
 
             # 解析新邮件数量
             new_count = 0

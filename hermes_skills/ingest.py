@@ -18,8 +18,8 @@ class IngestHermesSkill(HermesSkill):
         def _run():
             try:
                 subprocess.run(
-                    ["/usr/bin/python3", str(INGEST_SCRIPT), "--since", "2"],
-                    capture_output=True, text=True, timeout=120,
+                    ["/usr/bin/python3", str(INGEST_SCRIPT), "--since", "7"],
+                    capture_output=True, text=True, timeout=900,
                 )
             except Exception as e:
                 log.warning(f"ingest error: {e}")
