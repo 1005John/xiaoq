@@ -1,6 +1,6 @@
 # XiaoQ HarmonyOS Mobile
 
-HarmonyOS companion application for XiaoQ. It provides LAN-authenticated text chat, meeting recording and summaries, editable meeting todos, camera viewing, and manual gimbal control.
+HarmonyOS companion application for XiaoQ. It provides LAN-authenticated text chat, optional MiMo-V2.5 single-frame visual questions, meeting recording and summaries, editable meeting todos, camera viewing, and manual gimbal control.
 
 ## Build Setup
 

@@ -24,6 +24,7 @@ struct Index {
   @State talkState: string = '输入文字后发送给小Q'
   @State chatReply: string = ''
   @State speakOnDevice: boolean = false
+  @State attachCamera: boolean = false
   @State pan: number = 90
   @State tilt: number = 150
   @State manualMode: boolean = false
@@ -62,6 +63,7 @@ struct Index {
       this.host = String(store.getSync('host', '192.168.137.220'))
       this.token = String(store.getSync('token', ''))
       this.speakOnDevice = Boolean(store.getSync('speak_on_device', false))
+      this.attachCamera = Boolean(store.getSync('attach_camera', false))
     } catch (error) {
       this.message('无法读取已保存的连接配置')
     }
@@ -72,6 +74,7 @@ struct Index {
     store.putSync('host', this.host.trim())
     store.putSync('token', this.token.trim())
     store.putSync('speak_on_device', this.speakOnDevice)
+    store.putSync('attach_camera', this.attachCamera)
     await store.flush()
   }
 
@@ -117,11 +120,21 @@ struct Index {
     }
     this.applyConnection()
     try {
-      const result = await XiaoQApi.chat(this.chatText.trim(), this.speakOnDevice)
+      this.talkState = this.attachCamera ? '正在拍摄并请求视觉回答...' : '正在请求小Q回答...'
+      const result = this.attachCamera
+        ? await XiaoQApi.visionChat(this.chatText.trim(), this.speakOnDevice)
+        : await XiaoQApi.chat(this.chatText.trim(), this.speakOnDevice)
       this.chatReply = result.reply || '小Q已收到消息，但树莓派服务没有返回文字回复，请更新树莓派端程序'
-      this.talkState = this.speakOnDevice ? '小Q已回复，并将在设备扬声器播报' : '小Q已回复'
+      if (this.attachCamera) {
+        this.talkState = this.speakOnDevice
+          ? '已用摄像头画面回答，并将在设备扬声器播报'
+          : '已用摄像头画面回答'
+      } else {
+        this.talkState = this.speakOnDevice ? '小Q已回复，并将在设备扬声器播报' : '小Q已回复'
+      }
       this.chatText = ''
     } catch (error) {
+      this.talkState = this.attachCamera ? '视觉回答失败，请检查摄像头和网络' : '文字回答失败，请稍后重试'
       this.message((error as Error).message)
     }
   }
@@ -219,6 +232,14 @@ struct Index {
             this.saveConnection()
           })
         Text('同时让小Q扬声器播报').fontSize(14).fontColor('#C8D2E3').margin({ left: 10 })
+      }.width('100%')
+      Row() {
+        Toggle({ type: ToggleType.Switch, isOn: this.attachCamera })
+          .onChange((isOn: boolean): void => {
+            this.attachCamera = isOn
+            this.saveConnection()
+          })
+        Text('附带摄像头画面，用 MiMo 视觉回答').fontSize(14).fontColor('#C8D2E3').margin({ left: 10 })
       }.width('100%')
       if (this.chatReply.length > 0) {
         Column({ space: 8 }) {

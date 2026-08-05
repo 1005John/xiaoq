@@ -39,6 +39,12 @@ export interface ChatResponse {
   status: string
   text: string
   reply: string
+  model?: string
+  speaker_dispatched?: boolean
+}
+
+export interface VisionResponse extends ChatResponse {
+  model: string
 }
 
 interface TodoItem {
@@ -102,6 +108,15 @@ export class XiaoQApi {
       http.RequestMethod.POST,
       JSON.stringify({ text: text, speak: speakOnDevice })
     )) as ChatResponse
+    return result
+  }
+
+  static async visionChat(text: string, speakOnDevice: boolean): Promise<VisionResponse> {
+    const result = JSON.parse(await XiaoQApi.request(
+      '/api/vision',
+      http.RequestMethod.POST,
+      JSON.stringify({ text: text, speak: speakOnDevice })
+    )) as VisionResponse
     return result
   }
 

@@ -3627,7 +3627,7 @@ class VoiceManager:
             _wav_b64 = _b64.b64encode(_wav_bytes).decode('ascii')
 
             _api_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
-            _api_key = os.environ.get("XIAOMI_MIMO_API_KEY", "")
+            _api_key = os.environ.get("XIAOMI_MIMO_API_KEY", os.environ.get("XIAOMI_API_KEY", ""))
 
             _body = _json.dumps({
                 "model": "mimo-v2.5-asr",
@@ -3713,7 +3713,7 @@ class VoiceManager:
                 data=_body,
                 headers={
                     "Content-Type": "application/json; charset=utf-8",
-                    "api-key": os.environ.get("XIAOMI_MIMO_API_KEY", ""),
+                    "api-key": os.environ.get("XIAOMI_MIMO_API_KEY", os.environ.get("XIAOMI_API_KEY", "")),
                 }
             )
 
@@ -4420,7 +4420,7 @@ __REPORT_CONTENT__
                                     capture_output=True, text=True, timeout=10)
                                 _total_s = float(_dur_r.stdout.strip())
                                 # MiMo ASR key
-                                _asr_key = os.environ.get("XIAOMI_MIMO_API_KEY", "")
+                                _asr_key = os.environ.get("XIAOMI_MIMO_API_KEY", os.environ.get("XIAOMI_API_KEY", ""))
                                 _asr_url = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
                                 # 分 60秒一段处理
                                 _chunk_s = 60
@@ -4869,6 +4869,25 @@ class WSServer:
                     threading.Thread(target=voice_mgr.tts, args=(txt,),
                                      kwargs={"on_end": lambda: setattr(voice_mgr, 'state', 'idle')},
                                      daemon=True).start()
+
+            elif cmd_type == "mobile_reply":
+                # A mobile visual request has already been answered by MiMo-V2.5
+                # in mobile_control.py. Display the same answer locally and only
+                # use the speaker when the phone-side setting requests it.
+                txt = str(cmd.get("reply", "")).strip()
+                if txt and voice_mgr:
+                    print(f"[Mobile-Vision] reply='{txt[:60]}'")
+                    card_mgr.show("视觉回答", [line for line in txt.split("\n") if line.strip()] or [txt], "todo")
+                    if bool(cmd.get("speak", False)):
+                        voice_mgr.state = "speaking"
+                        threading.Thread(
+                            target=voice_mgr.tts,
+                            args=(txt,),
+                            kwargs={"on_end": lambda: setattr(voice_mgr, 'state', 'idle')},
+                            daemon=True,
+                        ).start()
+                    else:
+                        voice_mgr.state = "idle"
 
             elif cmd_type == "voice_inject":
                 # iter3 debug: 直接注入ASR文本, 跳过录音, 测试L3 intent

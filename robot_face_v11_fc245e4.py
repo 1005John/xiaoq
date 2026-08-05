@@ -40,9 +40,20 @@ log = logging.getLogger("v10")
 
 def _get_mimo_api_key():
     """Load the MiMo key from the environment or Hermes desktop config."""
-    key = os.environ.get("XIAOMI_MIMO_API_KEY", "").strip()
-    if key:
-        return key
+    for name in ("XIAOMI_MIMO_API_KEY", "XIAOMI_API_KEY"):
+        key = os.environ.get(name, "").strip()
+        if key:
+            return key
+    try:
+        with open(os.path.expanduser("~/.hermes/.env"), encoding="utf-8") as env_file:
+            for line in env_file:
+                name, separator, value = line.partition("=")
+                if separator and name.strip() in {"XIAOMI_MIMO_API_KEY", "XIAOMI_API_KEY"}:
+                    key = value.strip().strip("\"'")
+                    if key:
+                        return key
+    except OSError:
+        pass
     try:
         config_path = os.path.expanduser("~/.hermes/hermes-desktop-assistant/config.json")
         with open(config_path, encoding="utf-8") as config_file:
@@ -5000,6 +5011,25 @@ class WSServer:
                     threading.Thread(target=voice_mgr.tts, args=(txt,),
                                      kwargs={"on_end": lambda: setattr(voice_mgr, 'state', 'idle')},
                                      daemon=True).start()
+
+            elif cmd_type == "mobile_reply":
+                # A mobile visual request has already been answered by MiMo-V2.5
+                # in mobile_control.py. Display the same answer locally and only
+                # use the speaker when the phone-side setting requests it.
+                txt = str(cmd.get("reply", "")).strip()
+                if txt and voice_mgr:
+                    print(f"[Mobile-Vision] reply='{txt[:60]}'")
+                    card_mgr.show("视觉回答", [line for line in txt.split("\n") if line.strip()] or [txt], "todo")
+                    if bool(cmd.get("speak", False)):
+                        voice_mgr.state = "speaking"
+                        threading.Thread(
+                            target=voice_mgr.tts,
+                            args=(txt,),
+                            kwargs={"on_end": lambda: setattr(voice_mgr, 'state', 'idle')},
+                            daemon=True,
+                        ).start()
+                    else:
+                        voice_mgr.state = "idle"
 
             elif cmd_type == "voice_inject":
                 # iter3 debug: 直接注入ASR文本, 跳过录音, 测试L3 intent

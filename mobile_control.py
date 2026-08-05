@@ -12,6 +12,7 @@ import secrets
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +39,10 @@ MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 VOICE_EXTENSIONS = {".m4a", ".mp3", ".wav", ".aac", ".ogg", ".webm"}
 MEETING_EXTENSIONS = VOICE_EXTENSIONS | {".wma"}
 MIMO_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+VISION_MODEL = "mimo-v2.5"
+VISION_CAPTURE_TIMEOUT = 10.0
+MAX_VISION_TEXT = 2000
+MAX_VISION_IMAGE_BYTES = 8 * 1024 * 1024
 
 for directory in (VOICE_ROOT, CHAT_ROOT, MEETING_INBOX, MEETING_ARCHIVE, MEETING_OUTPUT, MEETING_JOBS):
     directory.mkdir(parents=True, exist_ok=True)
@@ -182,14 +187,96 @@ def send_command(command: dict[str, Any]) -> bool:
 
 
 def mimo_key() -> str:
-    key = os.environ.get("XIAOMI_MIMO_API_KEY", "").strip()
-    if key:
-        return key
+    for name in ("XIAOMI_MIMO_API_KEY", "XIAOMI_API_KEY"):
+        key = os.environ.get(name, "").strip()
+        if key:
+            return key
+    env_path = Path.home() / ".hermes/.env"
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            name, separator, value = line.partition("=")
+            if separator and name.strip() in {"XIAOMI_MIMO_API_KEY", "XIAOMI_API_KEY"}:
+                key = value.strip().strip("\"'")
+                if key:
+                    return key
+    except OSError:
+        pass
     config = Path.home() / ".hermes/hermes-desktop-assistant/config.json"
     try:
-        return json.loads(config.read_text(encoding="utf-8")).get("aliyun_api_key", "").strip()
+        values = json.loads(config.read_text(encoding="utf-8"))
+        return str(values.get("xiaomi_mimo_api_key", values.get("aliyun_api_key", ""))).strip()
     except (OSError, json.JSONDecodeError):
         return ""
+
+
+def chat_content(data: dict[str, Any]) -> str:
+    """Read text from the OpenAI-compatible response variants used by MiMo."""
+    try:
+        message = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ).strip()
+    return ""
+
+
+def vision_reply(question: str, frame: bytes) -> str:
+    """Ask MiMo-V2.5 about one camera frame and return the visible answer."""
+    if len(frame) == 0:
+        raise RuntimeError("camera returned an empty frame")
+    if len(frame) > MAX_VISION_IMAGE_BYTES:
+        raise RuntimeError("camera frame is too large")
+    key = mimo_key()
+    if not key:
+        raise RuntimeError("MiMo API key is not configured")
+
+    image = base64.b64encode(frame).decode("ascii")
+    payload = json.dumps({
+        "model": VISION_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是小Q的视觉助手。根据摄像头当前画面回答用户问题；看不清或画面没有依据时要明确说明，不要猜测。回答简洁、自然。",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": question},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}},
+                ],
+            },
+        ],
+        # Leave enough budget for MiMo's internal reasoning before its visible
+        # answer. The phone should receive only `content`, never hidden traces.
+        "max_tokens": 1500,
+        "stream": False,
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(MIMO_URL, data=payload, headers={
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {key}",
+        "api-key": key,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:240]
+        raise RuntimeError(f"MiMo 视觉请求失败 ({exc.code}): {detail}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"MiMo 视觉请求超时或网络不可用: {exc}") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError("MiMo 视觉接口返回了无效响应") from exc
+
+    reply = chat_content(data)
+    if not reply:
+        raise RuntimeError("MiMo 视觉接口没有返回文字回答")
+    return reply
 
 
 def transcribe_wav(wav_path: Path) -> str:
@@ -287,8 +374,24 @@ class CameraStream:
         with self.lock:
             if self.started:
                 return
+            self.error = ""
             self.started = True
             threading.Thread(target=self._capture, daemon=True, name="mobile-camera").start()
+
+    def snapshot(self, timeout: float = VISION_CAPTURE_TIMEOUT) -> bytes:
+        """Wait for the latest encoded frame without opening a second camera."""
+        self.ensure_started()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self.lock:
+                frame = self.frame
+                error = self.error
+            if error:
+                raise RuntimeError(error)
+            if frame:
+                return frame
+            time.sleep(0.05)
+        raise RuntimeError("camera frame timeout")
 
     def _capture(self) -> None:
         try:
@@ -311,6 +414,7 @@ class CameraStream:
             app.logger.warning("camera unavailable: %s", exc)
             with self.lock:
                 self.error = "camera unavailable"
+                self.started = False
 
     def generate(self):
         self.ensure_started()
@@ -383,6 +487,39 @@ def chat():
         time.sleep(0.2)
     job_path.unlink(missing_ok=True)
     return jsonify({"ok": False, "error": "小Q回复超时"}), 504
+
+
+@app.post("/api/vision")
+def vision_chat():
+    """Capture one frame, ask MiMo-V2.5, and optionally play it on XiaoQ."""
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text", "")).strip()
+    speak = bool(payload.get("speak", False))
+    if len(text) < 2 or len(text) > MAX_VISION_TEXT:
+        return jsonify({"ok": False, "error": "text must contain 2-2000 characters"}), 400
+    try:
+        frame = camera_stream.snapshot()
+        reply = vision_reply(text, frame)
+    except RuntimeError as exc:
+        app.logger.warning("vision chat failed: %s", exc)
+        status_code = 503 if "camera" in str(exc).lower() else 502
+        return jsonify({"ok": False, "error": str(exc)}), status_code
+
+    speaker_dispatched = False
+    if speak:
+        speaker_dispatched = send_command({
+            "type": "mobile_reply",
+            "reply": reply,
+            "speak": True,
+        })
+    return jsonify({
+        "ok": True,
+        "status": "completed",
+        "text": text,
+        "reply": reply,
+        "model": VISION_MODEL,
+        "speaker_dispatched": speaker_dispatched,
+    })
 
 
 @app.post("/api/voice")
