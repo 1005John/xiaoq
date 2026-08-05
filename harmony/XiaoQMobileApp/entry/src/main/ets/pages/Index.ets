@@ -1,0 +1,546 @@
+import { webview } from '@kit.ArkWeb';
+import { promptAction } from '@kit.ArkUI';
+import { preferences } from '@kit.ArkData';
+import { XiaoQApi } from '../common/XiaoQApi';
+import { Recorder } from '../common/Recorder';
+import { Uploader } from '../common/Uploader';
+
+interface MeetingActionItem {
+  text: string
+  reminderDate: string
+  reminderTime: string
+  created: boolean
+  todoId: number
+}
+
+@Entry
+@Component
+struct Index {
+  @State tab: number = 0
+  @State host: string = '192.168.137.220'
+  @State token: string = ''
+  @State online: string = '未连接'
+  @State chatText: string = ''
+  @State talkState: string = '输入文字后发送给小Q'
+  @State chatReply: string = ''
+  @State speakOnDevice: boolean = false
+  @State pan: number = 90
+  @State tilt: number = 150
+  @State manualMode: boolean = false
+  @State remoteState: string = '自动模式：表情控制云台'
+  // Keep the Web component absent until the paired token is available. This
+  // makes saving settings construct a fresh, authenticated camera request.
+  @State cameraUrl: string = ''
+  @State showCamera: boolean = false
+  @State meetingState: string = '准备录制会议'
+  @State meetingRecording: boolean = false
+  @State meetingPaused: boolean = false
+  @State meetingMarkdown: string = ''
+  @State meetingFile: string = ''
+  @State meetingActions: MeetingActionItem[] = []
+  private cameraController: webview.WebviewController = new webview.WebviewController()
+  private cameraRefreshId: number = 0
+  private meetingRecorder: Recorder = new Recorder()
+
+  aboutToAppear(): void {
+    this.loadSavedConnection()
+    this.refreshCameraStream()
+    this.syncGimbalMode()
+  }
+
+  onPageShow(): void {
+    this.refreshCameraStream()
+  }
+
+  private connectionStore(): preferences.Preferences {
+    return preferences.getPreferencesSync(getContext(this), { name: 'xiaoq_connection' })
+  }
+
+  private loadSavedConnection(): void {
+    try {
+      const store = this.connectionStore()
+      this.host = String(store.getSync('host', '192.168.137.220'))
+      this.token = String(store.getSync('token', ''))
+      this.speakOnDevice = Boolean(store.getSync('speak_on_device', false))
+    } catch (error) {
+      this.message('无法读取已保存的连接配置')
+    }
+  }
+
+  private async saveConnection(): Promise<void> {
+    const store = this.connectionStore()
+    store.putSync('host', this.host.trim())
+    store.putSync('token', this.token.trim())
+    store.putSync('speak_on_device', this.speakOnDevice)
+    await store.flush()
+  }
+
+  private applyConnection(): void {
+    XiaoQApi.configure(this.host, this.token)
+  }
+
+  private refreshCameraStream(): void {
+    this.applyConnection()
+    const source = this.token.trim().length > 0
+      ? `${XiaoQApi.streamUrl()}&refresh=${Date.now()}` : ''
+    const refreshId = ++this.cameraRefreshId
+    // Recreate Web instead of relying on a stopped MJPEG connection to reload.
+    this.showCamera = false
+    setTimeout((): void => {
+      if (refreshId !== this.cameraRefreshId) {
+        return
+      }
+      this.cameraUrl = source
+      this.showCamera = source.length > 0
+    }, 80)
+  }
+
+  private message(text: string): void {
+    promptAction.showToast({ message: text, duration: 2000 })
+  }
+
+  private async checkConnection(): Promise<void> {
+    this.refreshCameraStream()
+    try {
+      await this.saveConnection()
+      this.online = await XiaoQApi.status() ? '小Q在线' : '小Q未运行'
+      await this.syncGimbalMode()
+    } catch (error) {
+      this.online = `连接失败: ${(error as Error).message}`
+    }
+  }
+
+  private async sendText(): Promise<void> {
+    if (this.chatText.trim().length === 0) {
+      this.message('请输入要发送的内容')
+      return
+    }
+    this.applyConnection()
+    try {
+      const result = await XiaoQApi.chat(this.chatText.trim(), this.speakOnDevice)
+      this.chatReply = result.reply || '小Q已收到消息，但树莓派服务没有返回文字回复，请更新树莓派端程序'
+      this.talkState = this.speakOnDevice ? '小Q已回复，并将在设备扬声器播报' : '小Q已回复'
+      this.chatText = ''
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  private async moveGimbal(): Promise<void> {
+    if (!this.manualMode) {
+      return
+    }
+    this.applyConnection()
+    try {
+      await XiaoQApi.gimbal(this.pan, this.tilt)
+      this.remoteState = `手动模式：P${this.pan}° / T${this.tilt}°`
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  private async syncGimbalMode(): Promise<void> {
+    this.applyConnection()
+    try {
+      const state = await XiaoQApi.gimbalState()
+      this.manualMode = state.mode === 'manual'
+      this.pan = state.pan
+      this.tilt = state.tilt
+      this.remoteState = this.manualMode
+        ? `手动模式：P${this.pan}° / T${this.tilt}°`
+        : '自动模式：表情控制云台'
+    } catch (error) {
+      this.remoteState = '无法获取云台模式'
+    }
+  }
+
+  private async toggleGimbalMode(): Promise<void> {
+    this.applyConnection()
+    try {
+      const state = await XiaoQApi.setGimbalMode(this.manualMode ? 'auto' : 'manual')
+      this.manualMode = state.mode === 'manual'
+      this.pan = state.pan
+      this.tilt = state.tilt
+      this.remoteState = this.manualMode
+        ? `手动模式：P${this.pan}° / T${this.tilt}°`
+        : '自动模式：表情控制云台'
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  build(): void {
+    Column() {
+      Row() {
+        Text('小Q遥控').fontSize(24).fontWeight(FontWeight.Bold).fontColor('#F4F7FB')
+        Blank()
+        Text(this.online).fontSize(13).fontColor(this.online === '小Q在线' ? '#79DFA6' : '#F4C07A')
+      }.width('100%').padding({ left: 20, right: 20, top: 16, bottom: 10 })
+      Tabs({ barPosition: BarPosition.End }) {
+        TabContent() { this.talkPage() }.tabBar(this.tabLabel('对讲', 0))
+        TabContent() { this.remotePage() }.tabBar(this.tabLabel('遥控', 1))
+        TabContent() { this.meetingPage() }.tabBar(this.tabLabel('会议', 2))
+        TabContent() { this.settingsPage() }.tabBar(this.tabLabel('设置', 3))
+      }.vertical(false).barHeight(54).width('100%').layoutWeight(1)
+        .barBackgroundColor('#101722')
+        .onChange((index: number): void => {
+          this.tab = index
+          if (index === 1) {
+            this.refreshCameraStream()
+            this.syncGimbalMode()
+          }
+          if (index === 2) {
+            this.loadLatestMeeting()
+          }
+        })
+    }.width('100%').height('100%').backgroundColor('#101722')
+  }
+
+  @Builder
+  private tabLabel(title: string, index: number): void {
+    Text(title)
+      .width('100%').height('100%').textAlign(TextAlign.Center)
+      .fontSize(16).fontWeight(this.tab === index ? FontWeight.Medium : FontWeight.Regular)
+      .fontColor(this.tab === index ? '#2E85FF' : '#AAB8CE')
+  }
+
+  @Builder
+  private talkPage(): void {
+    Column({ space: 18 }) {
+      Text(this.talkState).fontColor('#C8D2E3').fontSize(15).width('100%')
+      TextArea({ text: this.chatText, placeholder: '输入文字发给小Q' })
+        .height(120).fontSize(17).backgroundColor('#1B2635').fontColor('#F4F7FB')
+        .placeholderColor('#8290A4').onChange((value: string): void => { this.chatText = value })
+      Button('发送文字').width('100%').onClick((): void => { this.sendText() })
+      Row() {
+        Toggle({ type: ToggleType.Switch, isOn: this.speakOnDevice })
+          .onChange((isOn: boolean): void => {
+            this.speakOnDevice = isOn
+            this.saveConnection()
+          })
+        Text('同时让小Q扬声器播报').fontSize(14).fontColor('#C8D2E3').margin({ left: 10 })
+      }.width('100%')
+      if (this.chatReply.length > 0) {
+        Column({ space: 8 }) {
+          Text('小Q回复').fontSize(14).fontColor('#8290A4')
+          Text(this.chatReply).fontSize(17).fontColor('#F4F7FB').width('100%')
+        }.width('100%').padding(14).backgroundColor('#1B2635')
+      }
+    }.padding(20).alignItems(HorizontalAlign.Start).width('100%')
+  }
+
+  @Builder
+  private remotePage(): void {
+    Column({ space: 14 }) {
+      if (this.showCamera && this.cameraUrl.length > 0) {
+        Web({ src: this.cameraUrl, controller: this.cameraController })
+          .width('100%').height(250).backgroundColor('#000000')
+      } else {
+        Text('请先在设置页保存设备令牌，再打开摄像头画面。')
+          .width('100%').height(250).textAlign(TextAlign.Center)
+          .fontSize(15).fontColor('#8290A4').backgroundColor('#000000')
+      }
+      Button('刷新画面').width('100%').onClick((): void => { this.refreshCameraStream() })
+      Text(this.remoteState).fontSize(14).fontColor('#C8D2E3')
+      Text(`左右 ${this.pan}°`).fontSize(16).fontColor('#F4F7FB')
+      Slider({ value: this.pan, min: 75, max: 105, step: 1 })
+        .enabled(this.manualMode)
+        .onChange((value: number): void => { this.pan = Math.round(value); this.moveGimbal() })
+      Text(`上下 ${this.tilt}°`).fontSize(16).fontColor('#F4F7FB')
+      Slider({ value: this.tilt, min: 138, max: 162, step: 1 })
+        .enabled(this.manualMode)
+        .onChange((value: number): void => { this.tilt = Math.round(value); this.moveGimbal() })
+      Button(this.manualMode ? '切换到自动' : '切换到手动')
+        .width('100%').onClick((): void => { this.toggleGimbalMode() })
+      Text(this.manualMode ? '手动模式下可通过滑杆控制云台。' : '自动模式下由小Q表情控制云台。')
+        .fontSize(13).fontColor('#8290A4')
+    }.padding(20).alignItems(HorizontalAlign.Start).width('100%')
+  }
+
+  private async startMeeting(): Promise<void> {
+    this.applyConnection()
+    try {
+      await this.meetingRecorder.start(getContext(this))
+      this.meetingRecording = true
+      this.meetingPaused = false
+      this.meetingState = '录音中'
+      this.meetingMarkdown = ''
+      this.meetingActions = []
+    } catch (error) {
+      this.message(`无法开始录音: ${(error as Error).message}`)
+    }
+  }
+
+  private async pauseMeeting(): Promise<void> {
+    try {
+      this.meetingPaused = await this.meetingRecorder.pauseOrResume()
+      this.meetingState = this.meetingPaused ? '已暂停录音' : '录音中'
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  private async stopMeeting(): Promise<void> {
+    try {
+      this.meetingState = '正在保存录音'
+      const path = await this.meetingRecorder.stop()
+      this.meetingRecording = false
+      this.meetingPaused = false
+      this.meetingState = '正在发送录音给小Q'
+      this.applyConnection()
+      const jobId = await Uploader.audio(getContext(this), path, true)
+      this.meetingState = '小Q正在转写并生成会议纪要'
+      this.pollMeeting(jobId, 0)
+    } catch (error) {
+      this.meetingRecording = false
+      this.meetingPaused = false
+      this.meetingState = '会议录音处理失败'
+      this.message((error as Error).message)
+    }
+  }
+
+  private async pollMeeting(jobId: string, attempts: number): Promise<void> {
+    try {
+      const job = await XiaoQApi.meetingJob(jobId)
+      if (job.status === 'completed' && job.result_file.length > 0) {
+        await this.loadMeetingResult(job.result_file)
+        this.meetingState = '会议纪要已生成'
+        return
+      }
+      if (job.status === 'failed') {
+        this.meetingState = '会议纪要生成失败'
+        this.message(job.error || '请稍后重试')
+        return
+      }
+      if (attempts >= 90) {
+        this.meetingState = '仍在处理，可点击会议纪要刷新结果'
+        return
+      }
+      setTimeout((): void => { this.pollMeeting(jobId, attempts + 1) }, 4000)
+    } catch (error) {
+      this.meetingState = '无法获取会议处理状态'
+      this.message((error as Error).message)
+    }
+  }
+
+  private async loadLatestMeeting(): Promise<void> {
+    this.applyConnection()
+    try {
+      const meetings = await XiaoQApi.meetings()
+      if (meetings.length > 0) {
+        await this.loadMeetingResult(meetings[0].filename)
+      }
+    } catch (error) {
+      // The meeting page remains usable before the first successful upload.
+    }
+  }
+
+  private async loadMeetingResult(filename: string): Promise<void> {
+    const result = await XiaoQApi.meetingResult(filename)
+    this.meetingFile = result.filename
+    this.meetingMarkdown = result.markdown
+    this.meetingActions = result.tasks.map((text: string): MeetingActionItem => ({
+      text: text,
+      reminderDate: this.todayDate(),
+      reminderTime: '09:00',
+      created: false,
+      todoId: 0,
+    }))
+  }
+
+  private twoDigits(value: number): string {
+    return value < 10 ? `0${value}` : `${value}`
+  }
+
+  private todayDate(): string {
+    const today = new Date()
+    return `${today.getFullYear()}-${this.twoDigits(today.getMonth() + 1)}-${this.twoDigits(today.getDate())}`
+  }
+
+  private dateFromText(value: string): Date {
+    const parts = value.split('-').map((part: string): number => Number(part))
+    if (parts.length === 3 && Number.isInteger(parts[0]) && Number.isInteger(parts[1]) && Number.isInteger(parts[2])) {
+      return new Date(parts[0], parts[1] - 1, parts[2])
+    }
+    return new Date()
+  }
+
+  private updateMeetingActionText(index: number, text: string): void {
+    const current = this.meetingActions[index]
+    if (!current) {
+      return
+    }
+    const actions = [...this.meetingActions]
+    actions[index] = {
+      text: text,
+      reminderDate: current.reminderDate,
+      reminderTime: current.reminderTime,
+      created: current.created,
+      todoId: current.todoId,
+    }
+    this.meetingActions = actions
+  }
+
+  private updateMeetingReminderDate(index: number, reminderDate: string): void {
+    const current = this.meetingActions[index]
+    if (!current) {
+      return
+    }
+    const actions = [...this.meetingActions]
+    actions[index] = {
+      text: current.text,
+      reminderDate: reminderDate,
+      reminderTime: current.reminderTime,
+      created: current.created,
+      todoId: current.todoId,
+    }
+    this.meetingActions = actions
+  }
+
+  private updateMeetingReminderTime(index: number, reminderTime: string): void {
+    const current = this.meetingActions[index]
+    if (!current) {
+      return
+    }
+    const actions = [...this.meetingActions]
+    actions[index] = {
+      text: current.text,
+      reminderDate: current.reminderDate,
+      reminderTime: reminderTime,
+      created: current.created,
+      todoId: current.todoId,
+    }
+    this.meetingActions = actions
+  }
+
+  private chooseMeetingReminderDate(index: number): void {
+    const selected = this.dateFromText(this.meetingActions[index]?.reminderDate || this.todayDate())
+    DatePickerDialog.show({
+      start: new Date(2026, 0, 1),
+      selected: selected,
+      onDateAccept: (value: Date): void => {
+        this.updateMeetingReminderDate(index,
+          `${value.getFullYear()}-${this.twoDigits(value.getMonth() + 1)}-${this.twoDigits(value.getDate())}`)
+      },
+      onDateChange: (value: Date): void => {
+        this.updateMeetingReminderDate(index,
+          `${value.getFullYear()}-${this.twoDigits(value.getMonth() + 1)}-${this.twoDigits(value.getDate())}`)
+      },
+    })
+  }
+
+  private timeFromText(value: string): Date {
+    const parts = value.split(':').map((part: string): number => Number(part))
+    const selected = new Date()
+    if (parts.length === 2 && Number.isInteger(parts[0]) && Number.isInteger(parts[1])
+      && parts[0] >= 0 && parts[0] < 24 && parts[1] >= 0 && parts[1] < 60) {
+      selected.setHours(parts[0], parts[1], 0, 0)
+    } else {
+      selected.setHours(9, 0, 0, 0)
+    }
+    return selected
+  }
+
+  private chooseMeetingReminderTime(index: number): void {
+    const selected = this.timeFromText(this.meetingActions[index]?.reminderTime || '09:00')
+    TimePickerDialog.show({
+      selected: selected,
+      useMilitaryTime: true,
+      onAccept: (value: TimePickerResult): void => {
+        this.updateMeetingReminderTime(index, `${this.twoDigits(value.hour)}:${this.twoDigits(value.minute)}`)
+      },
+      onChange: (value: TimePickerResult): void => {
+        this.updateMeetingReminderTime(index, `${this.twoDigits(value.hour)}:${this.twoDigits(value.minute)}`)
+      },
+      onEnterSelectedArea: (value: TimePickerResult): void => {
+        this.updateMeetingReminderTime(index, `${this.twoDigits(value.hour)}:${this.twoDigits(value.minute)}`)
+      },
+    })
+  }
+
+  private async createMeetingTodo(index: number): Promise<void> {
+    const item = this.meetingActions[index]
+    if (!item || item.text.trim().length < 2) {
+      this.message('待办内容至少需要两个字符')
+      return
+    }
+    try {
+      this.applyConnection()
+      const reminderTime = item.reminderTime.trim() || '09:00'
+      const reminderDate = item.reminderDate.trim() || this.todayDate()
+      const updating = item.todoId > 0
+      if (updating) {
+        await XiaoQApi.updateTodo(item.todoId, item.text.trim(), reminderTime, reminderDate)
+      } else {
+        item.todoId = await XiaoQApi.createTodo(item.text.trim(), reminderTime, reminderDate)
+      }
+      item.created = true
+      this.meetingActions = [...this.meetingActions]
+      this.message(updating ? '已更新小Q待办' : '已创建小Q待办')
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  @Builder
+  private meetingPage(): void {
+    Scroll() {
+      Column({ space: 14 }) {
+        Text(this.meetingState).fontSize(16).fontColor('#C8D2E3').width('100%')
+        if (!this.meetingRecording) {
+          Button('启动录音').width('100%').onClick((): void => { this.startMeeting() })
+        } else {
+          Button(this.meetingPaused ? '继续录音' : '暂停录音')
+            .width('100%').onClick((): void => { this.pauseMeeting() })
+          Button('停止并生成会议纪要').width('100%').onClick((): void => { this.stopMeeting() })
+        }
+        Button('会议纪要').width('100%').onClick((): void => { this.loadLatestMeeting() })
+        if (this.meetingMarkdown.length > 0) {
+          Text(this.meetingFile).fontSize(13).fontColor('#8290A4').width('100%')
+          Text(this.meetingMarkdown).fontSize(14).fontColor('#F4F7FB').width('100%')
+            .backgroundColor('#1B2635').padding(12)
+        }
+        if (this.meetingActions.length > 0) {
+          Text('待办事项').fontSize(19).fontColor('#F4F7FB').fontWeight(FontWeight.Medium).width('100%')
+          ForEach(this.meetingActions, (item: MeetingActionItem, index: number) => {
+            Column({ space: 8 }) {
+              TextInput({ text: item.text, placeholder: '待办内容' })
+                .fontSize(16).backgroundColor('#1B2635').fontColor('#F4F7FB')
+                .onChange((value: string): void => {
+                  this.updateMeetingActionText(index, value)
+                })
+              Row({ space: 8 }) {
+                Button(item.reminderDate)
+                  .width('49%').fontSize(14)
+                  .onClick((): void => { this.chooseMeetingReminderDate(index) })
+                Button(item.reminderTime)
+                  .layoutWeight(1).fontSize(15)
+                  .onClick((): void => { this.chooseMeetingReminderTime(index) })
+              }.width('100%')
+              Button(item.created ? '更新待办' : '创建待办')
+                .width('100%').onClick((): void => { this.createMeetingTodo(index) })
+            }.width('100%').padding(12).backgroundColor('#162130')
+          // Include displayed fields in the key. ArkUI otherwise preserves the
+          // cached list row after a picker callback replaces this item.
+          }, (item: MeetingActionItem, index: number): string =>
+            `${index}_${item.text}_${item.reminderDate}_${item.reminderTime}_${item.created}`)
+        }
+      }.padding(20).alignItems(HorizontalAlign.Start).width('100%')
+    }.width('100%').height('100%')
+  }
+
+  @Builder
+  private settingsPage(): void {
+    Column({ space: 16 }) {
+      Text('连接小Q').fontSize(20).fontColor('#F4F7FB').fontWeight(FontWeight.Medium)
+      TextInput({ text: this.host, placeholder: '树莓派 IP 地址' })
+        .onChange((value: string): void => { this.host = value })
+        .backgroundColor('#1B2635').fontColor('#F4F7FB')
+      TextInput({ text: this.token, placeholder: '设备令牌' })
+        .onChange((value: string): void => { this.token = value })
+        .backgroundColor('#1B2635').fontColor('#F4F7FB')
+      Button('保存并测试连接').width('100%').onClick((): void => { this.checkConnection() })
+      Text('设备令牌保存在树莓派 data/mobile_control_token。').fontSize(13).fontColor('#8290A4')
+    }.padding(20).alignItems(HorizontalAlign.Start).width('100%')
+  }
+}

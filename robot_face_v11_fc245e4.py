@@ -4021,10 +4021,26 @@ class VoiceManager:
         finally:
             self._pending = False
 
-    def process_text(self, txt):
-        """直接处理文本 (跳过ASR, 用于voice_inject测试)"""
+    def _write_mobile_reply(self, reply_path, status, reply="", error=""):
+        """写回手机对讲请求结果；普通本机语音链路不传 reply_path。"""
+        if not reply_path:
+            return
+        try:
+            payload = {"status": status, "reply": reply}
+            if error:
+                payload["error"] = error
+            temporary = reply_path + ".tmp"
+            with open(temporary, "w", encoding="utf-8") as _reply_file:
+                json.dump(payload, _reply_file, ensure_ascii=False)
+            os.replace(temporary, reply_path)
+        except Exception as _reply_error:
+            print(f"[Mobile] reply write failed: {_reply_error}")
+
+    def process_text(self, txt, speak=True, reply_path=""):
+        """直接处理文本；手机请求可选择是否播报，并等待文字结果。"""
         if self._pending:
             print("[Voice] Already processing, skipping")
+            self._write_mobile_reply(reply_path, "failed", error="小Q正在处理上一条消息")
             return
         self._pending = True
         try:
@@ -4034,6 +4050,7 @@ class VoiceManager:
             if not txt or len(txt) < 2:
                 print("[Voice] Empty text")
                 self.state = "idle"
+                self._write_mobile_reply(reply_path, "failed", error="文字内容过短")
                 return
 
             self.state = "thinking"
@@ -4082,13 +4099,18 @@ class VoiceManager:
                                 ws_server.command_queue.append(cmd)
                                 with open("/tmp/v10_debug.txt","a") as _df: _df.write("step6c: appended\n")
                                 print(f"[L3] side_effect queued: {cmd}")
-                        with open("/tmp/v10_debug.txt","a") as _df: _df.write("step7a: before TTS\n")
-                        print(f"[L3] TTS: {tts_text}")
-                        with open("/tmp/v10_debug.txt","a") as _df: _df.write("step7b: calling TTS\n")
-                        self.tts(tts_text,
-                                on_start=lambda: setattr(self, 'state', 'speaking'),
-                                on_end=lambda: setattr(self, 'state', 'idle'))
-                        with open("/tmp/v10_debug.txt","a") as _df: _df.write("step7c: TTS returned\n")
+                        self.reply_text = tts_text
+                        self._write_mobile_reply(reply_path, "completed", tts_text)
+                        if speak:
+                            with open("/tmp/v10_debug.txt","a") as _df: _df.write("step7a: before TTS\n")
+                            print(f"[L3] TTS: {tts_text}")
+                            with open("/tmp/v10_debug.txt","a") as _df: _df.write("step7b: calling TTS\n")
+                            self.tts(tts_text,
+                                    on_start=lambda: setattr(self, 'state', 'speaking'),
+                                    on_end=lambda: setattr(self, 'state', 'idle'))
+                            with open("/tmp/v10_debug.txt","a") as _df: _df.write("step7c: TTS returned\n")
+                        else:
+                            self.state = "idle"
                         return
                     else:
                         print(f"[L3] Skill failed: {result.error}, falling back to Hermes")
@@ -4096,11 +4118,14 @@ class VoiceManager:
                     print(f"[L3] Exception: {e}, falling back to Hermes")
             # 最终兜底 → Hermes
             print(f"[AI] Calling Hermes: {txt}")
-            self._call_hermes(txt)
+            self._call_hermes(txt, speak=speak, reply_path=reply_path)
+        except Exception as _mobile_error:
+            self._write_mobile_reply(reply_path, "failed", error=str(_mobile_error)[:160])
+            print(f"[Mobile] text processing failed: {_mobile_error}")
         finally:
             self._pending = False
 
-    def _call_hermes(self, txt):
+    def _call_hermes(self, txt, speak=True, reply_path=""):
         """调用 Hermes API Server (v0.15.1, 常驻端口8086，无冷启动)"""
         import json as _json, urllib.request as _ur
 
@@ -4789,6 +4814,7 @@ __REPORT_CONTENT__</body></html>"""
             print('[ACTION] '+a)
 
         self.reply_text = reply
+        self._write_mobile_reply(reply_path, "completed", reply)
         try:
             card_lines = [l.strip() for l in reply.split("\n") if l.strip()]
             cmd = {
@@ -4820,10 +4846,13 @@ __REPORT_CONTENT__</body></html>"""
             if _clean:
                 voice_text = _clean
         
-        self.state = "speaking"
-        self.tts(voice_text,
-                on_start=lambda: setattr(self, 'state', 'speaking'),
-                on_end=lambda: setattr(self, 'state', 'idle'))
+        if speak:
+            self.state = "speaking"
+            self.tts(voice_text,
+                    on_start=lambda: setattr(self, 'state', 'speaking'),
+                    on_end=lambda: setattr(self, 'state', 'idle'))
+        else:
+            self.state = "idle"
 
 
     def quit(self):
@@ -4978,7 +5007,15 @@ class WSServer:
                 if txt and voice_mgr:
                     print(f"[Voice-Inject] text='{txt}'")
                     voice_mgr.asr_text = txt
-                    threading.Thread(target=voice_mgr.process_text, args=(txt,), daemon=True).start()
+                    threading.Thread(
+                        target=voice_mgr.process_text,
+                        args=(txt,),
+                        kwargs={
+                            "speak": bool(cmd.get("speak", True)),
+                            "reply_path": str(cmd.get("reply_path", "")),
+                        },
+                        daemon=True,
+                    ).start()
 
             # ── v10新增指令 ──
             elif cmd_type == "screenshot":
