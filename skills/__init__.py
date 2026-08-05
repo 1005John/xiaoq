@@ -9,6 +9,7 @@ from .bug import BugSkill
 from .ingest import IngestSkill
 from .email_knowledge import EmailKnowledgeSkill
 from .wechat_knowledge import WechatKnowledgeSkill
+from .esp32_led import Esp32LedSkill
 
 __all__ = [
     "Skill", "SkillManager", "SkillResult", "SideEffect",
@@ -16,4 +17,5 @@ __all__ = [
     "LingjiSkill", "BugSkill",
     "IngestSkill",
     "EmailKnowledgeSkill", "WechatKnowledgeSkill",
+    "Esp32LedSkill",
 ]

@@ -3527,6 +3527,18 @@ def match_intent(text):
         return None
     text_lower = text.lower()
 
+    # ESP32 RGB 灯采用明确关键词直达，避免被通用语义路由误判。
+    led_colors = {
+        "红": "red", "绿色": "green", "绿": "green", "蓝": "blue",
+        "白": "white", "黄": "yellow", "紫": "purple",
+    }
+    if "关灯" in text_lower or "关闭灯" in text_lower:
+        return ("esp32_led", "esp32_led", {"color": "off"})
+    if any(keyword in text_lower for keyword in ("led", "灯光", "小q灯", "小q 的灯", "小q的灯", "变灯", "把灯")):
+        for keyword, color in led_colors.items():
+            if keyword in text_lower:
+                return ("esp32_led", "esp32_led", {"color": color})
+
     # 1. 微信关键词拦截（不走语义）
     if "微信" in text_lower:
         return ("wechat_knowledge", "wechat_knowledge", {})
