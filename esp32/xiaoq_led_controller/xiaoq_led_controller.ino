@@ -34,7 +34,7 @@ void setColor(const String& value) {
   if (!parseColor(value, &rgb)) {
     return;
   }
-  rgbLedWrite(RGB_LED_PIN, rgb.red, rgb.green, rgb.blue);
+  neopixelWrite(RGB_LED_PIN, rgb.red, rgb.green, rgb.blue);
   currentColor = value;
   currentColor.toLowerCase();
 }
