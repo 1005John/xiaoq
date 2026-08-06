@@ -3685,6 +3685,7 @@ class VoiceManager:
     """语音识别+合成+处理"""
     def __init__(self):
         self.proc = None  # arecord进程
+        self._tts_proc = None  # aplay实时播放进程
         self.rec_file = '/tmp/voice_rec.wav'
         self.mono_file = '/tmp/voice_in.wav'
         self.state = "idle"  # idle/listening/thinking/speaking
@@ -3708,7 +3709,7 @@ class VoiceManager:
         _kp.run(["pkill", "-f", "arecord.*plughw"], capture_output=True, timeout=1)
         self.asr_text = ""  # 清空旧ASR文字
         self._tts_stop = True
-        _subprocess.run(["pkill", "-f", "aplay.*tts_out"], capture_output=True, timeout=1)
+        self._stop_tts_playback()
         self.state = "listening"
         self.proc = _subprocess.Popen(
             ['arecord', '-D', 'plughw:CARD=seeed2micvoicec,DEV=0', '-f', 'S16_LE', '-r', '16000', '-c', '2', self.rec_file],
@@ -3799,7 +3800,7 @@ class VoiceManager:
         return ""
 
     def tts(self, text, voice=None, on_start=None, on_end=None):
-        """MiMo-V2.5-TTS -> WAV + aplay播放"""
+        """MiMo-V2.5-TTS -> PCM流式写入 aplay，边生成边播放。"""
         if not text: return
         if voice is None:
             try:
@@ -3817,6 +3818,9 @@ class VoiceManager:
             except: pass
             self.proc = None
             time.sleep(0.3)
+        self._tts_stop = False
+        self._stop_tts_playback()
+        time.sleep(0.1)
         try:
             import urllib.request as _ur, base64 as _b64, json as _json, subprocess as _sp
 
@@ -3839,9 +3843,18 @@ class VoiceManager:
                 }
             )
 
-            _audio_buf = b""
+            _play_proc = _sp.Popen(
+                ["aplay", "-q", "-D", "plughw:CARD=seeed2micvoicec,DEV=0",
+                 "-t", "raw", "-f", "S16_LE", "-r", "24000", "-c", "1", "-"],
+                stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            )
+            self._tts_proc = _play_proc
+            _audio_bytes = 0
+            _first_audio = False
             with _ur.urlopen(_req, timeout=60) as _resp:
                 for _line in _resp:
+                    if self._tts_stop:
+                        break
                     _line = _line.decode("utf-8", errors="replace").strip()
                     if not _line.startswith("data: "): continue
                     _ds = _line[6:]
@@ -3850,22 +3863,59 @@ class VoiceManager:
                         _chunk = _json.loads(_ds)
                         _audio = _chunk.get("choices",[{}])[0].get("delta",{}).get("audio",{})
                         if _audio and "data" in _audio:
-                            _audio_buf += _b64.b64decode(_audio["data"])
+                            _pcm = _b64.b64decode(_audio["data"])
+                            if _pcm and _play_proc.stdin:
+                                _play_proc.stdin.write(_pcm)
+                                _play_proc.stdin.flush()
+                                _audio_bytes += len(_pcm)
+                                if not _first_audio:
+                                    _first_audio = True
+                                    print("[TTS] First audio chunk sent to speaker")
                     except: pass
 
-            if _audio_buf:
-                import wave
-                with wave.open('/tmp/tts_out.wav', 'wb') as _wf:
-                    _wf.setnchannels(1); _wf.setsampwidth(2)
-                    _wf.setframerate(24000)
-                    _wf.writeframes(_audio_buf)
-                _sp.run(["aplay", "-q", "-D", "plughw:CARD=seeed2micvoicec,DEV=0", "/tmp/tts_out.wav"], timeout=30)
-                print(f"[TTS] Played {len(_audio_buf)//1024}KB")
+            if _play_proc.stdin:
+                _play_proc.stdin.close()
+            _play_proc.wait(timeout=30)
+            if _audio_bytes:
+                print(f"[TTS] Stream played {_audio_bytes//1024}KB")
+            elif _play_proc.returncode:
+                print(f"[TTS] aplay exited with code {_play_proc.returncode}")
 
         except Exception as e:
             print(f"[TTS] Error: {e}")
+            try:
+                if '_play_proc' in locals() and _play_proc.stdin:
+                    _play_proc.stdin.close()
+                if '_play_proc' in locals():
+                    _play_proc.terminate()
+                    _play_proc.wait(timeout=2)
+            except Exception:
+                pass
+        finally:
+            if getattr(self, "_tts_proc", None) is locals().get("_play_proc"):
+                self._tts_proc = None
         if on_end: on_end()
         print("[TTS] Done")
+
+    def _stop_tts_playback(self):
+        """Stop an active raw-PCM aplay process before recording or new TTS."""
+        _play_proc = self._tts_proc
+        self._tts_proc = None
+        if not _play_proc:
+            return
+        try:
+            if _play_proc.stdin:
+                _play_proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            _play_proc.terminate()
+            _play_proc.wait(timeout=2)
+        except Exception:
+            try:
+                _play_proc.kill()
+            except Exception:
+                pass
 
     def _call_llm_direct(self, prompt, is_context_prompt=False):
         """直连 MiMo（不经过本地代理）"""
@@ -5067,6 +5117,8 @@ __REPORT_CONTENT__</body></html>"""
         if self.proc:
             try: self.proc.terminate()
             except: pass
+        self._tts_stop = True
+        self._stop_tts_playback()
 
 
 # ── WebSocket 服务端 ──
