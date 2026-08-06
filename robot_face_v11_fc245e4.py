@@ -3963,6 +3963,11 @@ class VoiceManager:
                             print(f"[L3] Mark-done fallback to last skill: {_last_sk}")
                             intent = (_iid, _last_sk, _icfg["params"])
                             break
+            # A follow-up such as "这里面有需要重点关注的吗" has no
+            # standalone email keyword. Keep the previous skill in context
+            # and let the email skill's model decide whether it is related.
+            if not intent and _CONTEXT.get("last_skill") == "email_knowledge":
+                intent = ("email_followup", "email_knowledge", {})
             if intent:
                 intent_id, skill_name, skill_params = intent
                 print(f"[L3] Intent matched: {intent_id} → skill '{skill_name}'")
@@ -4152,6 +4157,11 @@ class VoiceManager:
                             print(f"[L3] Mark-done fallback to last skill: {_last_sk}")
                             intent = (_iid, _last_sk, _icfg["params"])
                             break
+            # A follow-up such as "这里面有需要重点关注的吗" has no
+            # standalone email keyword. Keep the previous skill in context
+            # and let the email skill's model decide whether it is related.
+            if not intent and _CONTEXT.get("last_skill") == "email_knowledge":
+                intent = ("email_followup", "email_knowledge", {})
             if intent:
                 intent_id, skill_name, skill_params = intent
                 print(f"[L3] Intent matched: {intent_id} → skill '{skill_name}'")

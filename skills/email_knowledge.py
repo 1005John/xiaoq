@@ -77,26 +77,33 @@ class EmailKnowledgeSkill(Skill):
         params = params or {}
         asr_text = params.get("_asr_text", "")
 
-        # Continue the previous date query before treating a follow-up as a
-        # new full-text search. The model decides whether it is a true
-        # follow-up, so phrases such as "这里面" do not need keyword rules.
-        previous_analysis = self._analyze_previous(asr_text)
-        if previous_analysis:
-            return SkillResult(
-                success=True,
-                side_effects=[
-                    SideEffect("card_show", {
-                        "title": "邮件重点关注分析",
-                        "lines": previous_analysis.splitlines(),
-                        "card_type": "todo",
-                    }),
-                    SideEffect("voice_tts", {"text": previous_analysis[:500]}),
-                ],
-            )
-
         # Time-range questions are best served by the local date index rather
         # than full-text search, which can omit otherwise recent messages.
         recent_periods = ("最近一周", "近一周", "过去一周", "最近7天", "近7天", "过去7天")
+        date_hint = (
+            any(word in asr_text for word in ("昨天", "今天", "前天", "最近", "近7天", "过去7天"))
+            or re.search(r"\d{1,2}月\d{1,2}(?:日|号)?", asr_text)
+        )
+
+        # Continue the previous date query before treating a follow-up as a
+        # new full-text search. The model decides whether it is a true
+        # follow-up, so phrases such as "这里面" do not need keyword rules.
+        if self._last_items and not date_hint:
+            previous_analysis = self._analyze_previous(asr_text)
+            if previous_analysis:
+                return SkillResult(
+                    success=True,
+                    side_effects=[
+                        SideEffect("card_show", {
+                            "title": "邮件重点关注分析",
+                            "lines": previous_analysis.splitlines(),
+                            "card_type": "todo",
+                        }),
+                        SideEffect("voice_tts", {"text": previous_analysis[:500]}),
+                    ],
+                )
+            return SkillResult(success=False, error="not an email follow-up")
+
         target_day = None
         if any(word in asr_text for word in ("昨天", "最近一天", "最近1天", "过去一天")):
             target_day = date.today() - timedelta(days=1)
