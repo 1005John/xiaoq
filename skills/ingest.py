@@ -39,8 +39,11 @@ class IngestSkill(Skill):
                     result.returncode, result.stderr.strip()[-500:],
                 )
                 return SkillResult(
-                    success=False,
-                    side_effects=[SideEffect("voice_tts", {"text": "邮件知识库更新失败，请稍后重试"})],
+                    # This is an expected user-facing failure. Do not fall
+                    # through to the general LLM, which cannot repair mailbox
+                    # authentication and may produce an unsafe guess.
+                    success=True,
+                    side_effects=[SideEffect("voice_tts", {"text": "邮件知识库更新失败，请检查邮箱登录配置"})],
                 )
 
             # 解析新邮件数量
