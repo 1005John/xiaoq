@@ -3548,6 +3548,12 @@ def match_intent(text):
     if any(hint in text_lower for hint in hermes_test_skill_hints):
         return None
 
+    # Refreshing the email knowledge base is an action, not a search. Route it
+    # before semantic matching so the word "邮件" cannot select email_knowledge.
+    email_refresh_words = ("刷新", "拉取", "更新", "同步", "导入")
+    if "邮件" in text_lower and any(word in text_lower for word in email_refresh_words):
+        return ("ingest", "ingest", {})
+
     # Handle explicit laptop file requests before generic keywords such as
     # "天气" can route the same sentence to the weather skill.
     remote_hints = ("ssh", "远程登录", "登录笔记本", "登录电脑", "操作笔记本", "操作电脑")
