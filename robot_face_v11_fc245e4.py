@@ -492,6 +492,20 @@ EXPRESSION_GIMBAL = {
     "star_eyes":  (90, 145),
 }
 
+# Keep phone commands inside the same envelope used by face expressions.
+MOBILE_GIMBAL_PAN_MIN = 75
+MOBILE_GIMBAL_PAN_MAX = 105
+MOBILE_GIMBAL_TILT_MIN = 138
+MOBILE_GIMBAL_TILT_MAX = 162
+_mobile_gimbal_pan = 90
+_mobile_gimbal_tilt = 150
+_mobile_gimbal_manual_until = 0.0
+
+
+def mobile_gimbal_is_manual():
+    """Whether a phone currently owns the gimbal."""
+    return time.monotonic() < _mobile_gimbal_manual_until
+
 
 
 
@@ -639,14 +653,14 @@ class StateMachine:
         if self.gimbal is None:
             return
         try:
-            if _face_search_active or _is_sleeping:
+            if _face_search_active or _is_sleeping or mobile_gimbal_is_manual():
                 return
         except: pass
         mapping = EXPRESSION_GIMBAL.get(expr_name)
         if mapping is None or expr_name == self.last_gimbal_expr:
             return
         pan_a, tilt_a = mapping
-        self.gimbal.move_to(pan_a, tilt_a, 500, blocking=False)
+        self.gimbal.move_to(pan_a, tilt_a, 1000, blocking=False)
         self.last_gimbal_expr = expr_name
         print(f'[GIMBAL] {expr_name} -> P{pan_a} T{tilt_a}')
 
@@ -4256,7 +4270,12 @@ class VoiceManager:
                         _items = _json.load(open(_todo_path))
                         _active = [t for t in _items if not t.get("done") and not t.get("deleted")]
                         if _active:
-                            _skill_data = "待办列表：\n" + "\n".join(f"{i+1}. {t.get('text','?')}" for i, t in enumerate(_active[:10]))
+                            _skill_data = "待办列表：\n" + "\n".join(
+                                f"{i+1}. {t.get('text') or t.get('title', '?')} | "
+                                f"⏰{str(t.get('remind_at') or '未设置提醒').replace('T', ' ')[:16]} | "
+                                f"{'已提醒' if (t.get('notified') or t.get('reminded')) else '待提醒'}"
+                                for i, t in enumerate(_active[:10])
+                            )
                         else: _skill_data = "暂无待办"
                     except: pass
                 _sys1 += " 如果用户要添加待办，回复末尾包含JSON: {\"action\":\"add\",\"text\":\"完整原文\"}。如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 {\"action\":\"delete\",\"index\":\"all\"}（删除全部）。"
@@ -4396,7 +4415,12 @@ class VoiceManager:
                                 _items = _j.load(open(_todo_path))
                                 _active = [t for t in _items if not t.get("done") and not t.get("deleted")]
                                 if _active:
-                                    _skill_result = "待办列表：\n" + "\n".join(f"{i+1}. {t.get('text','?')}{' [已提醒]' if t.get('notified') else ''}" for i, t in enumerate(_active[:10]))
+                                    _skill_result = "待办列表：\n" + "\n".join(
+                                        f"{i+1}. {t.get('text') or t.get('title','?')} | "
+                                        f"⏰{str(t.get('remind_at') or '未设置提醒').replace('T', ' ')[:16]} | "
+                                        f"{'已提醒' if t.get('notified') else '待提醒'}"
+                                        for i, t in enumerate(_active[:10])
+                                    )
                                 else:
                                     _skill_result = "暂无待办"
                             except: _skill_result = "待办数据加载失败"
@@ -4870,10 +4894,31 @@ __REPORT_CONTENT__</body></html>"""
                 active = [t for t in todos if not t.get('done') and not t.get('deleted')]
                 ls = ['待办('+str(len(active))+'项):'] if active else ['暂无待办']
                 for i,t in enumerate(active,1):
-                    m = ' [已提醒]' if t.get('notified') else ''
-                    ls.append(str(i)+'. '+t.get('text','')+m)
+                    reminder = str(t.get('remind_at') or '未设置提醒').replace('T', ' ')[:16]
+                    status = '已提醒' if t.get('notified') else '待提醒'
+                    ls.append(str(i)+'. '+(t.get('text') or t.get('title',''))+' | ⏰'+reminder+' | '+status)
                 reply = chr(10).join(ls[:10])
             print('[ACTION] '+a)
+
+        # Render a todo query from structured state so reminder details are
+        # never omitted by the conversational model.
+        _todo_query_words = ["待办", "代办", "todo", "我的任务", "提醒事项", "任务列表", "待办清单"]
+        _todo_mutation_words = ["添加", "新增", "创建", "完成", "删除", "提醒我", "帮我记", "设置提醒"]
+        if (any(w in txt.lower() for w in _todo_query_words)
+                and not any(w in txt for w in _todo_mutation_words)):
+            try:
+                _todo_file = os.path.expanduser("~/xiaoq/data/todos.json")
+                _todos = _j2.loads(open(_todo_file, encoding="utf-8").read()) if os.path.exists(_todo_file) else []
+                _active = [t for t in _todos if not t.get("done") and not t.get("deleted")]
+                _todo_lines = [f"待办（{len(_active)}项）："] if _active else ["暂无待办"]
+                for _index, _todo in enumerate(_active[:10], 1):
+                    _reminder = str(_todo.get("remind_at") or "未设置提醒").replace("T", " ")[:16]
+                    _state = "已提醒" if (_todo.get("notified") or _todo.get("reminded")) else "待提醒"
+                    _content = _todo.get("text") or _todo.get("title") or "（无内容）"
+                    _todo_lines.append(f"{_index}. {_content} | ⏰{_reminder} | {_state}")
+                reply = chr(10).join(_todo_lines)
+            except Exception as _todo_display_error:
+                print(f"[Todo] display error: {_todo_display_error}")
 
         self.reply_text = reply
         self._write_mobile_reply(reply_path, "completed", reply)
@@ -4952,13 +4997,14 @@ class WSServer:
             except websockets.exceptions.ConnectionClosed:
                 print("[WS] 客户端断开")
 
-        server = await websockets.serve(handler, "0.0.0.0", 8766)
-        print("[WS] 表情服务器启动 ws://0.0.0.0:8766")
+        server = await websockets.serve(handler, "127.0.0.1", 8766)
+        print("[WS] 表情服务器启动 ws://127.0.0.1:8766")
         await asyncio.Future()
 
     def process_commands(self):
         """在主循环中处理指令"""
-        global _gimbal_manual_mode, _mobile_camera_reserved
+        global _mobile_gimbal_pan, _mobile_gimbal_tilt, _mobile_gimbal_manual_until
+        global _mobile_camera_reserved
         while self.command_queue:
             cmd = self.command_queue.pop(0)
             cmd_type = cmd.get("type")
@@ -5033,18 +5079,29 @@ class WSServer:
 
             # ── Mobile App camera / gimbal coordination ──
             elif cmd_type == "gimbal_manual":
-                _gimbal_manual_mode = True
+                _mobile_gimbal_manual_until = time.monotonic() + 60.0
                 _stop_face_tracking()
                 print("[Gimbal] 手机手动控制已启用，人脸追踪已暂停")
             elif cmd_type == "gimbal_move":
+                try:
+                    pan = int(cmd.get("pan", _mobile_gimbal_pan))
+                    tilt = int(cmd.get("tilt", _mobile_gimbal_tilt))
+                    hold_seconds = float(cmd.get("hold_seconds", 20))
+                except (TypeError, ValueError):
+                    print("[Gimbal] 忽略无效的手机云台命令")
+                    continue
+                _mobile_gimbal_pan = max(MOBILE_GIMBAL_PAN_MIN, min(MOBILE_GIMBAL_PAN_MAX, pan))
+                _mobile_gimbal_tilt = max(MOBILE_GIMBAL_TILT_MIN, min(MOBILE_GIMBAL_TILT_MAX, tilt))
+                _mobile_gimbal_manual_until = time.monotonic() + max(3.0, min(60.0, hold_seconds))
+                _stop_face_tracking()
                 if gimbal_ctrl is not None:
-                    pan = max(75, min(105, float(cmd.get("pan", 90))))
-                    tilt = max(138, min(162, float(cmd.get("tilt", 150))))
-                    gimbal_ctrl.move_to(pan, tilt, 300, blocking=False)
-                    print(f"[Gimbal] 手机移动: pan={pan:.0f}, tilt={tilt:.0f}")
+                    gimbal_ctrl.move_to(_mobile_gimbal_pan, _mobile_gimbal_tilt, 180, blocking=False)
+                print(f"[Gimbal] 手机移动: pan={_mobile_gimbal_pan}, tilt={_mobile_gimbal_tilt}")
             elif cmd_type == "gimbal_auto":
-                _gimbal_manual_mode = False
-                if not _is_sleeping:
+                _mobile_gimbal_manual_until = 0.0
+                if sm is not None:
+                    sm.last_gimbal_expr = ""
+                if not _is_sleeping and not _mobile_camera_reserved:
                     _start_face_tracking()
                 print("[Gimbal] 自动人脸追踪已恢复")
             elif cmd_type == "camera_reserve":
@@ -5053,7 +5110,7 @@ class WSServer:
                 print("[Camera] 已让出摄像头给手机视觉")
             elif cmd_type == "camera_release":
                 _mobile_camera_reserved = False
-                if not _is_sleeping and not _gimbal_manual_mode:
+                if not _is_sleeping and not mobile_gimbal_is_manual():
                     _start_face_tracking()
                 print("[Camera] 手机视觉已释放摄像头")
 
@@ -5267,7 +5324,7 @@ def _remind_callback(text, item=None):
     print(f"[Reminder] 触发: text={text}, item={item}")
     with open("/tmp/reminder_debug.txt","a") as _f: _f.write(f"TRIGGER text={text} item={item}\n")
     try:
-        card_text = item.get("text", text) if item else text
+        card_text = (item.get("text") or item.get("title") or text) if item else text
         print(f"[Reminder] card_text={card_text}")
         with open("/tmp/reminder_debug.txt","a") as _f: _f.write(f"CARD_TEXT={card_text}\n")
         ws_server.command_queue.append({"type": "voice_tts", "text": text})
@@ -5326,14 +5383,13 @@ _face_search = None
 _face_search_active = False
 _sleep_timer = 0
 _is_sleeping = False
-_gimbal_manual_mode = False
 _mobile_camera_reserved = False
 
 
 def _start_face_tracking():
     """Start the Hailo tracker once when the camera and gimbal are available."""
     global _face_search, _face_search_active
-    if gimbal_ctrl is None or _face_search_active or _gimbal_manual_mode or _mobile_camera_reserved:
+    if gimbal_ctrl is None or _face_search_active or mobile_gimbal_is_manual() or _mobile_camera_reserved:
         return
     try:
         from picamera2 import Picamera2
@@ -5565,9 +5621,9 @@ while running:
         _is_sleeping = False
         _sleep_timer = 0
     if _face_search_active and _face_search is not None:
-        if _is_sleeping or _gimbal_manual_mode or _mobile_camera_reserved:
+        if _is_sleeping or mobile_gimbal_is_manual() or _mobile_camera_reserved:
             _stop_face_tracking()
-    elif not _is_sleeping and not _gimbal_manual_mode and not _mobile_camera_reserved:
+    elif not _is_sleeping and not mobile_gimbal_is_manual() and not _mobile_camera_reserved:
         _start_face_tracking()
 
     ws_server.process_commands()
