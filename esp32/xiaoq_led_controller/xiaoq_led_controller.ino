@@ -72,6 +72,8 @@ void handleSetColor() {
 
 void connectWifi() {
   WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("Connecting to Wi-Fi %s", WIFI_SSID);
   for (int attempt = 0; WiFi.status() != WL_CONNECTED && attempt < 40; ++attempt) {
@@ -84,7 +86,7 @@ void connectWifi() {
       MDNS.addService("http", "tcp", 80);
     }
   } else {
-    Serial.println("\nWi-Fi connection failed; retrying in the main loop");
+    Serial.printf("\nWi-Fi connection failed (status=%d); retrying in the main loop\n", WiFi.status());
   }
 }
 
