@@ -25,7 +25,13 @@ def _read_json(path: Path) -> dict:
 
 
 def _extract_filename(text: str) -> str | None:
-    match = re.search(r"([^\s，。,。！？!?\"“”‘’「」『』]+\.(?:txt|md|log|csv|json))", text, flags=re.IGNORECASE)
+    match = re.search(
+        r"桌面(?:上有一个|上的|的|上)?\s*([^\s，。,。！？!?\"“”‘’「」『』]+\.(?:txt|md|log|csv|json))",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(r"([^\s，。,。！？!?\"“”‘’「」『』]+\.(?:txt|md|log|csv|json))", text, flags=re.IGNORECASE)
     if not match:
         return None
     filename = match.group(1).replace("/", "\\")
@@ -41,6 +47,10 @@ def _extract_filename(text: str) -> str | None:
 
 
 def _extract_content(text: str) -> str | None:
+    before_target = re.search(r"(?:把\s*)?内容\s*[：:]?\s*(.+?)\s*写(?:到|入|进|上)", text)
+    if before_target:
+        content = before_target.group(1).strip(" \t\"'“”‘’「」『』")
+        return content or None
     match = re.search(r"(?:写上|写入|写成|添加内容|内容(?:是|为)?)\s*[：:,，]?", text)
     if not match:
         return None
