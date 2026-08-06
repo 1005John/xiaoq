@@ -9,7 +9,9 @@ side_effects: card_show(type="todo") + voice_tts(简短摘要)
 
 import logging
 import re
+import sqlite3
 import subprocess
+from pathlib import Path
 
 from skills.base import Skill, SkillResult, SideEffect
 
@@ -32,6 +34,37 @@ class EmailKnowledgeSkill(Skill):
     def execute(self, params: dict = None) -> SkillResult:
         params = params or {}
         asr_text = params.get("_asr_text", "")
+
+        # Time-range questions are best served by the local date index rather
+        # than full-text search, which can omit otherwise recent messages.
+        recent_periods = ("最近一周", "近一周", "过去一周", "最近7天", "近7天", "过去7天")
+        if any(period in asr_text for period in recent_periods):
+            try:
+                db_path = Path(QUERY_SCRIPT).parent / "data" / "emails.db"
+                with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+                    rows = conn.execute(
+                        "SELECT date, subject FROM emails "
+                        "WHERE date >= date('now', '-7 days') ORDER BY date DESC"
+                    ).fetchall()
+                if rows:
+                    lines = [f"{date}: {subject}" for date, subject in rows]
+                    preview = "；".join(subject for _, subject in rows[:3])
+                    return SkillResult(
+                        success=True,
+                        data={"count": len(rows), "emails": lines},
+                        side_effects=[
+                            SideEffect("card_show", {
+                                "title": f"最近一周邮件 ({len(rows)}封)",
+                                "lines": lines,
+                                "card_type": "todo",
+                            }),
+                            SideEffect("voice_tts", {
+                                "text": f"最近一周有{len(rows)}封邮件，最新包括：{preview[:100]}"
+                            }),
+                        ],
+                    )
+            except (OSError, sqlite3.Error) as exc:
+                log.warning("recent email lookup failed: %s", exc)
 
         # 清理查询文本（产品名扩展已在 query.py 中处理）
         query = re.sub(
