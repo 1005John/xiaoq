@@ -82,7 +82,7 @@ void connectWifi() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("\nWi-Fi connected: %s\n", WiFi.localIP().toString().c_str());
-    if (MDNS.begin("xiaoq-led")) {
+    if (MDNS.begin(MDNS_HOSTNAME)) {
       MDNS.addService("http", "tcp", 80);
     }
   } else {

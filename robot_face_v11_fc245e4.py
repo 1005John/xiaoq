@@ -10,6 +10,7 @@ import pygame
 import pygame.freetype
 import math
 import random
+import re
 import sys
 import asyncio
 import threading
@@ -3532,12 +3533,14 @@ def match_intent(text):
         "红": "red", "绿色": "green", "绿": "green", "蓝": "blue",
         "白": "white", "黄": "yellow", "紫": "purple",
     }
+    device_match = re.search(r"(?:第)?\s*(\d+)\s*号?\s*(?:esp32|设备|开发板|灯)?", text_lower)
+    led_device_id = device_match.group(1) if device_match else "1"
     if "关灯" in text_lower or "关闭灯" in text_lower:
-        return ("esp32_led", "esp32_led", {"color": "off"})
-    if any(keyword in text_lower for keyword in ("led", "灯光", "小q灯", "小q 的灯", "小q的灯", "变灯", "把灯")):
+        return ("esp32_led", "esp32_led", {"color": "off", "device_id": led_device_id})
+    if any(keyword in text_lower for keyword in ("esp32", "led", "灯光", "小q灯", "小q 的灯", "小q的灯", "变灯", "把灯")):
         for keyword, color in led_colors.items():
             if keyword in text_lower:
-                return ("esp32_led", "esp32_led", {"color": color})
+                return ("esp32_led", "esp32_led", {"color": color, "device_id": led_device_id})
 
     # 1. 微信关键词拦截（不走语义）
     if "微信" in text_lower:
