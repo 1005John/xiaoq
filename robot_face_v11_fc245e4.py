@@ -4958,6 +4958,7 @@ class WSServer:
 
     def process_commands(self):
         """在主循环中处理指令"""
+        global _gimbal_manual_mode, _mobile_camera_reserved
         while self.command_queue:
             cmd = self.command_queue.pop(0)
             cmd_type = cmd.get("type")
@@ -5029,6 +5030,32 @@ class WSServer:
                 mood_name = cmd.get("mood", "idle")  # idle/happy/sad/angry/surprised/excited/curious/sleepy/love/focus
                 transition = cmd.get("transition", 1.5)
                 ambient_mgr.set_mood(mood_name, transition)
+
+            # ── Mobile App camera / gimbal coordination ──
+            elif cmd_type == "gimbal_manual":
+                _gimbal_manual_mode = True
+                _stop_face_tracking()
+                print("[Gimbal] 手机手动控制已启用，人脸追踪已暂停")
+            elif cmd_type == "gimbal_move":
+                if gimbal_ctrl is not None:
+                    pan = max(75, min(105, float(cmd.get("pan", 90))))
+                    tilt = max(138, min(162, float(cmd.get("tilt", 150))))
+                    gimbal_ctrl.move_to(pan, tilt, 300, blocking=False)
+                    print(f"[Gimbal] 手机移动: pan={pan:.0f}, tilt={tilt:.0f}")
+            elif cmd_type == "gimbal_auto":
+                _gimbal_manual_mode = False
+                if not _is_sleeping:
+                    _start_face_tracking()
+                print("[Gimbal] 自动人脸追踪已恢复")
+            elif cmd_type == "camera_reserve":
+                _mobile_camera_reserved = True
+                _stop_face_tracking()
+                print("[Camera] 已让出摄像头给手机视觉")
+            elif cmd_type == "camera_release":
+                _mobile_camera_reserved = False
+                if not _is_sleeping and not _gimbal_manual_mode:
+                    _start_face_tracking()
+                print("[Camera] 手机视觉已释放摄像头")
 
             # ── 语音指令 ──
             elif cmd_type == "voice_start":
@@ -5299,6 +5326,45 @@ _face_search = None
 _face_search_active = False
 _sleep_timer = 0
 _is_sleeping = False
+_gimbal_manual_mode = False
+_mobile_camera_reserved = False
+
+
+def _start_face_tracking():
+    """Start the Hailo tracker once when the camera and gimbal are available."""
+    global _face_search, _face_search_active
+    if gimbal_ctrl is None or _face_search_active or _gimbal_manual_mode or _mobile_camera_reserved:
+        return
+    try:
+        from picamera2 import Picamera2
+        if not Picamera2.global_camera_info():
+            print("[Face] 无摄像头, 跳过人脸追踪")
+            return
+        _face_search = HailoFace(gimbal_ctrl)
+        _face_search.start()
+        _face_search_active = True
+        print("[Face] Hailo 人脸检测与云台追踪已启动")
+    except Exception as _face_error:
+        print(f"[Face] 人脸追踪不可用: {_face_error}")
+        _face_search = None
+        _face_search_active = False
+
+
+def _stop_face_tracking():
+    """Release the camera before the mobile app takes manual or visual control."""
+    global _face_search, _face_search_active
+    if _face_search is not None:
+        try:
+            _face_search.stop()
+        except Exception as _face_error:
+            print(f"[Face] 停止人脸追踪失败: {_face_error}")
+    _face_search = None
+    _face_search_active = False
+
+
+if os.environ.get("XIAOQ_AUTO_FACE_TRACKING", "1").strip().lower() not in {"0", "false", "no", "off"}:
+    _start_face_tracking()
+
 while running:
     dt = clock.tick(FPS) / 1000.0
     fps_count += 1
@@ -5336,27 +5402,7 @@ while running:
                 _sleep_timer = 0
                 _is_sleeping = False
                 if npc_sm: npc_sm._set_state(NPCState.IDLE)
-                if gimbal_ctrl is not None and not _face_search_active:
-                    # 检查摄像头是否可用
-                    _camera_ok = False
-                    try:
-                        from picamera2 import Picamera2
-                        _info = Picamera2.global_camera_info()
-                        if len(_info) > 0:
-                            _camera_ok = True
-                    except:
-                        pass
-                    if _camera_ok:
-                        try:
-                            _face_search_active = True
-                            _face_search = HailoFace(gimbal_ctrl)
-                            _face_search.start()
-                        except Exception as _fe:
-                            print(f"[Face] 人脸追踪不可用: {_fe}")
-                            _face_search_active = False
-                            _face_search = None
-                    else:
-                        print("[Face] 无摄像头, 跳过人脸追踪")
+                _start_face_tracking()
                 print("[Voice] Push-to-talk: 开始录音")
             elif event.key == pygame.K_n:
                 # N: 切换NPC模式(原SPACE功能)
@@ -5519,13 +5565,10 @@ while running:
         _is_sleeping = False
         _sleep_timer = 0
     if _face_search_active and _face_search is not None:
-        if voice_mgr.state in ("listening", "thinking", "speaking"):
-            if _face_search.face_detected:
-                gimbal_ctrl.move_to(_face_search.face_pan, _face_search.face_tilt, 200, blocking=False)
-        else:
-            _face_search.stop()
-            _face_search = None
-            _face_search_active = False
+        if _is_sleeping or _gimbal_manual_mode or _mobile_camera_reserved:
+            _stop_face_tracking()
+    elif not _is_sleeping and not _gimbal_manual_mode and not _mobile_camera_reserved:
+        _start_face_tracking()
 
     ws_server.process_commands()
     # 语音状态 → 表情+卡片联动

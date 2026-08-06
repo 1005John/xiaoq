@@ -437,14 +437,39 @@ class CameraStream:
         self.frame: bytes | None = None
         self.error = ""
         self.started = False
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
 
     def ensure_started(self) -> None:
         with self.lock:
             if self.started:
                 return
             self.error = ""
+            self.frame = None
+            self.stop_event.clear()
             self.started = True
-            threading.Thread(target=self._capture, daemon=True, name="mobile-camera").start()
+        # Stop the Hailo pipeline before Picamera2 is opened for the phone.
+        send_command({"type": "camera_reserve"})
+        time.sleep(0.6)
+        thread = threading.Thread(target=self._capture, daemon=True, name="mobile-camera")
+        with self.lock:
+            self.thread = thread
+        thread.start()
+
+    def stop(self) -> None:
+        """Release Picamera2 and allow automatic Hailo tracking to resume."""
+        with self.lock:
+            thread = self.thread
+            if not self.started and thread is None:
+                return
+            self.stop_event.set()
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=3.0)
+        with self.lock:
+            self.started = False
+            self.thread = None
+            self.frame = None
+        send_command({"type": "camera_release"})
 
     def snapshot(self, timeout: float = VISION_CAPTURE_TIMEOUT) -> bytes:
         """Wait for the latest encoded frame without opening a second camera."""
@@ -462,6 +487,7 @@ class CameraStream:
         raise RuntimeError("camera frame timeout")
 
     def _capture(self) -> None:
+        camera = None
         try:
             import cv2
             from picamera2 import Picamera2
@@ -471,7 +497,7 @@ class CameraStream:
                 main={"size": (640, 360), "format": "RGB888"}, buffer_count=2,
             ))
             camera.start()
-            while True:
+            while not self.stop_event.is_set():
                 frame = cv2.flip(camera.capture_array(), 1)
                 ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72])
                 if ok:
@@ -483,18 +509,28 @@ class CameraStream:
             with self.lock:
                 self.error = "camera unavailable"
                 self.started = False
+        finally:
+            if camera is not None:
+                try:
+                    camera.stop()
+                    camera.close()
+                except Exception:
+                    pass
 
     def generate(self):
         self.ensure_started()
-        while True:
-            with self.lock:
-                frame = self.frame
-                error = self.error
-            if error:
-                return
-            if frame:
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-            time.sleep(1 / 15)
+        try:
+            while True:
+                with self.lock:
+                    frame = self.frame
+                    error = self.error
+                if error:
+                    return
+                if frame:
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                time.sleep(1 / 15)
+        finally:
+            self.stop()
 
 
 camera_stream = CameraStream()
@@ -566,7 +602,11 @@ def vision_chat():
     if len(text) < 2 or len(text) > MAX_VISION_TEXT:
         return jsonify({"ok": False, "error": "text must contain 2-2000 characters"}), 400
     try:
-        frame = camera_stream.snapshot()
+        try:
+            frame = camera_stream.snapshot()
+        finally:
+            # The model call only needs the captured JPEG, not the live camera.
+            camera_stream.stop()
         reply = record_visual_remote_devices(record_visual_led_state(vision_reply(text, frame)))
     except RuntimeError as exc:
         app.logger.warning("vision chat failed: %s", exc)
