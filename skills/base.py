@@ -113,7 +113,6 @@ class SkillManager:
         from .relax import RelaxSkill
         from .bgm import BgmSkill
         from .lingji import LingjiSkill
-        from .bug import BugSkill
         from .ingest import IngestSkill
         from .email_knowledge import EmailKnowledgeSkill
         from .wechat_knowledge import WechatKnowledgeSkill
@@ -127,7 +126,6 @@ class SkillManager:
         self.register(RelaxSkill(cfg.get("relax", {})))
         self.register(BgmSkill(cfg.get("eod_bgm", {})))
         self.register(LingjiSkill(cfg.get("lingji", {})))
-        self.register(BugSkill(cfg.get("bug", {})))
         self.register(IngestSkill(cfg.get("ingest", {})))
         self.register(EmailKnowledgeSkill(cfg.get("email_knowledge", {})))
         self.register(WechatKnowledgeSkill(cfg.get("wechat_knowledge", {})))

@@ -3455,11 +3455,6 @@ INTENT_SKILL_MAP_SEMANTIC = {
         "params": {"action": "list"},
         "tts_template": "",
     },
-    "bug_list": {
-        "skill": "bug",
-        "params": {"action": "list"},
-        "tts_template": "",
-    },
     "weather": {
         "skill": "weather",
         "params": {},
@@ -3627,7 +3622,6 @@ def match_intent(text):
         # 仅用少数关键区分词做降级
         kw_fallback = {
             "todo_list": ["待办", "代办", "清单", "添加"],
-            "bug_list": ["缺陷", "bug", "测试"],
             "weather": ["天气", "温度", "下雨"],
             "news": ["新闻", "消息", "资讯"],
             "relax": ["放松", "木鱼", "休息"],
