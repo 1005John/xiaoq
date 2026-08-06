@@ -11,6 +11,7 @@ import logging
 import re
 import sqlite3
 import subprocess
+from datetime import date, timedelta
 from pathlib import Path
 
 from skills.base import Skill, SkillResult, SideEffect
@@ -38,28 +39,51 @@ class EmailKnowledgeSkill(Skill):
         # Time-range questions are best served by the local date index rather
         # than full-text search, which can omit otherwise recent messages.
         recent_periods = ("最近一周", "近一周", "过去一周", "最近7天", "近7天", "过去7天")
-        if any(period in asr_text for period in recent_periods):
+        target_day = None
+        if any(word in asr_text for word in ("昨天", "最近一天", "最近1天", "过去一天")):
+            target_day = date.today() - timedelta(days=1)
+        else:
+            month_day = re.search(r"(\d{1,2})月(\d{1,2})(?:日|号)?", asr_text)
+            if month_day:
+                month, day = (int(value) for value in month_day.groups())
+                year = date.today().year
+                if month > date.today().month:
+                    year -= 1
+                try:
+                    target_day = date(year, month, day)
+                except ValueError:
+                    target_day = None
+
+        if target_day or any(period in asr_text for period in recent_periods):
             try:
                 db_path = Path(QUERY_SCRIPT).parent / "data" / "emails.db"
                 with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-                    rows = conn.execute(
-                        "SELECT date, subject FROM emails "
-                        "WHERE date >= date('now', '-7 days') ORDER BY date DESC"
-                    ).fetchall()
+                    if target_day:
+                        rows = conn.execute(
+                            "SELECT date, subject FROM emails WHERE date = ? ORDER BY date DESC",
+                            (target_day.isoformat(),),
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            "SELECT date, subject FROM emails "
+                            "WHERE date >= date('now', '-7 days') ORDER BY date DESC"
+                        ).fetchall()
                 if rows:
                     lines = [f"{date}: {subject}" for date, subject in rows]
                     preview = "；".join(subject for _, subject in rows[:3])
+                    title = f"{target_day.isoformat()}邮件 ({len(rows)}封)" if target_day else f"最近一周邮件 ({len(rows)}封)"
+                    period = f"{target_day.month}月{target_day.day}日" if target_day else "最近一周"
                     return SkillResult(
                         success=True,
                         data={"count": len(rows), "emails": lines},
                         side_effects=[
                             SideEffect("card_show", {
-                                "title": f"最近一周邮件 ({len(rows)}封)",
+                                "title": title,
                                 "lines": lines,
                                 "card_type": "todo",
                             }),
                             SideEffect("voice_tts", {
-                                "text": f"最近一周有{len(rows)}封邮件，最新包括：{preview[:100]}"
+                                "text": f"{period}有{len(rows)}封邮件，最新包括：{preview[:100]}"
                             }),
                         ],
                     )
