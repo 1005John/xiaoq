@@ -8,6 +8,7 @@ side_effects: card_show(type="todo") + voice_tts(简短摘要)
 """
 
 import logging
+import json
 import re
 import sqlite3
 import subprocess
@@ -20,6 +21,7 @@ log = logging.getLogger("skills.email_knowledge")
 
 QUERY_SCRIPT = "/home/johnf/.hermes/skills/email/email-knowledge/query.py"
 QUERY_TIMEOUT = 25
+LLM_CONFIG_FILE = Path(QUERY_SCRIPT).parent / "config" / "llm.json"
 
 
 class EmailKnowledgeSkill(Skill):
@@ -32,9 +34,65 @@ class EmailKnowledgeSkill(Skill):
         super().__init__(cfg)
         self._last_items = []
 
+    def _analyze_previous(self, question: str):
+        """Answer a follow-up from the previous date result semantically."""
+        if not self._last_items or not LLM_CONFIG_FILE.exists():
+            return None
+        try:
+            from openai import OpenAI
+
+            cfg = json.loads(LLM_CONFIG_FILE.read_text(encoding="utf-8")).get("llm", {})
+            client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+            records = json.dumps(self._last_items[:50], ensure_ascii=False)
+            response = client.chat.completions.create(
+                model=cfg.get("model", "mimo-v2.5-pro"),
+                temperature=0.1,
+                max_tokens=700,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是邮件助理。用户正在追问上一轮邮件集合。"
+                            "只根据提供的邮件记录判断是否需要重点关注，关注截止日期、"
+                            "明确待办、会议评审、测试风险、账号安全和需要回复的事项。"
+                            "列出邮件主题并说明原因，不要编造记录中没有的信息。"
+                            "如果用户其实提出了与上一轮无关的新邮件问题，只输出 NEW_EMAIL_QUERY。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"上一轮邮件记录：\n{records}\n\n用户追问：{question}",
+                    },
+                ],
+            )
+            text = (response.choices[0].message.content or "").strip()
+            if not text or text == "NEW_EMAIL_QUERY":
+                return None
+            return text
+        except Exception as exc:
+            log.warning("previous email analysis failed: %s", exc)
+            return None
+
     def execute(self, params: dict = None) -> SkillResult:
         params = params or {}
         asr_text = params.get("_asr_text", "")
+
+        # Continue the previous date query before treating a follow-up as a
+        # new full-text search. The model decides whether it is a true
+        # follow-up, so phrases such as "这里面" do not need keyword rules.
+        previous_analysis = self._analyze_previous(asr_text)
+        if previous_analysis:
+            return SkillResult(
+                success=True,
+                side_effects=[
+                    SideEffect("card_show", {
+                        "title": "邮件重点关注分析",
+                        "lines": previous_analysis.splitlines(),
+                        "card_type": "todo",
+                    }),
+                    SideEffect("voice_tts", {"text": previous_analysis[:500]}),
+                ],
+            )
 
         # Time-range questions are best served by the local date index rather
         # than full-text search, which can omit otherwise recent messages.
@@ -60,17 +118,26 @@ class EmailKnowledgeSkill(Skill):
                 with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
                     if target_day:
                         rows = conn.execute(
-                            "SELECT date, subject FROM emails WHERE date = ? ORDER BY date DESC",
+                            "SELECT date, sender, subject, summary, needs_action, action_items "
+                            "FROM emails WHERE date = ? ORDER BY date DESC",
                             (target_day.isoformat(),),
                         ).fetchall()
                     else:
                         rows = conn.execute(
-                            "SELECT date, subject FROM emails "
+                            "SELECT date, sender, subject, summary, needs_action, action_items FROM emails "
                             "WHERE date >= date('now', '-7 days') ORDER BY date DESC"
                         ).fetchall()
                 if rows:
-                    lines = [f"{date}: {subject}" for date, subject in rows]
-                    preview = "；".join(subject for _, subject in rows[:3])
+                    self._last_items = [
+                        {
+                            "date": row[0], "sender": row[1], "subject": row[2],
+                            "summary": row[3], "needs_action": row[4],
+                            "action_items": row[5],
+                        }
+                        for row in rows
+                    ]
+                    lines = [f"{row[0]}: {row[2]}" for row in rows]
+                    preview = "；".join(row[2] for row in rows[:3])
                     title = f"{target_day.isoformat()}邮件 ({len(rows)}封)" if target_day else f"最近一周邮件 ({len(rows)}封)"
                     period = f"{target_day.month}月{target_day.day}日" if target_day else "最近一周"
                     return SkillResult(
