@@ -3531,6 +3531,29 @@ def _get_semantic_matcher():
 # ── 上下文追踪：记住上次执行的技能 ──
 _CONTEXT = {"last_intent": None, "last_skill": None}
 
+def _load_recent_email_context():
+    """Load the recent email result and semantic focus analysis for follow-ups."""
+    try:
+        context_path = os.path.expanduser("~/xiaoq/data/email_context.json")
+        with open(context_path, encoding="utf-8") as context_file:
+            payload = json.load(context_file)
+        if time.time() - float(payload.get("saved_at", 0)) > 30 * 60:
+            return ""
+        analysis = payload.get("last_analysis") or ""
+        items = payload.get("items") or []
+        if not isinstance(items, list):
+            items = []
+        # Keep the prompt bounded while retaining structured action_items.
+        records = json.dumps(items[:30], ensure_ascii=False)
+        parts = []
+        if analysis:
+            parts.append("上一轮邮件重点关注分析：\n" + str(analysis))
+        if records != "[]":
+            parts.append("上一轮邮件记录（含 action_items）：\n" + records)
+        return "\n\n".join(parts)[:12000]
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return ""
+
 def match_intent(text):
     """L3 意图匹配 — 语义匹配 + 微信关键词拦截"""
     if not text:
@@ -4315,7 +4338,18 @@ class VoiceManager:
                             )
                         else: _skill_data = "暂无待办"
                     except: pass
-                _sys1 += " 如果用户要添加待办，回复末尾包含JSON: {\"action\":\"add\",\"text\":\"完整原文\"}。如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 {\"action\":\"delete\",\"index\":\"all\"}（删除全部）。"
+                _email_context = _load_recent_email_context()
+                if _email_context:
+                    _skill_data += "\n\n" + _email_context
+                _sys1 += (
+                    " 如果用户要添加一个待办，回复末尾包含JSON: "
+                    "{\"action\":\"add\",\"text\":\"待办内容\"}。"
+                    "如果用户要把上一轮邮件重点事项全部加入待办，必须根据邮件上下文提取事项，"
+                    "回复末尾包含JSON: {\"action\":\"add\",\"items\":[{\"text\":\"事项1\"},{\"text\":\"事项2\"}]}。"
+                    "如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。"
+                    "如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 "
+                    "{\"action\":\"delete\",\"index\":\"all\"}（删除全部）。"
+                )
 
             if _skill_data:
                 _user_msg = f"数据：\n{_skill_data}\n\n用户问：{txt}\n\n请根据数据回答"
@@ -4463,8 +4497,18 @@ class VoiceManager:
                             except: _skill_result = "待办数据加载失败"
                         else:
                             _skill_result = "暂无待办"
-                        # 待办操作仍需LLM输出JSON指令（添加/完成/删除）
-                        _sys += " 如果用户要添加待办，回复末尾包含JSON: {\"action\":\"add\",\"text\":\"完整原文\"}。如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 {\"action\":\"delete\",\"index\":\"all\"}（删除全部）。如果是查询，不要加JSON。"
+                        _email_context = _load_recent_email_context()
+                        if _email_context:
+                            _skill_result += "\n\n" + _email_context
+                        _sys += (
+                            " 如果用户要添加一个待办，回复末尾包含JSON: "
+                            "{\"action\":\"add\",\"text\":\"待办内容\"}。"
+                            "如果用户要把上一轮邮件重点事项全部加入待办，必须根据邮件上下文提取事项，"
+                            "回复末尾包含JSON: {\"action\":\"add\",\"items\":[{\"text\":\"事项1\"},{\"text\":\"事项2\"}]}。"
+                            "如果完成某项，回复末尾包含: {\"action\":\"done\",\"index\":N}。"
+                            "如果删除待办，回复末尾包含: {\"action\":\"delete\",\"index\":N} 或 "
+                            "{\"action\":\"delete\",\"index\":\"all\"}（删除全部）。如果是查询，不要加JSON。"
+                        )
 
                     elif _intent == "email":
                         try:
@@ -4909,11 +4953,26 @@ __REPORT_CONTENT__</body></html>"""
             QR  = os.path.expanduser('~/xiaoq/hermes_skills/query.py')
             TF  = os.path.expanduser('~/xiaoq/data/todos.json')
             if a == 'add':
-                t = _act.get('text','')
-                if t:
-                    # 传原始ASR文本给add.py解析时间，再传LLM提取的任务文本
-                    r = _sp.run(['python3', ADD, t], capture_output=True, text=True, timeout=10)
-                    reply = r.stdout.strip() or reply
+                _add_items = _act.get('items')
+                if isinstance(_add_items, list):
+                    _added_replies = []
+                    for _item in _add_items:
+                        _item_text = _item.get('text', '') if isinstance(_item, dict) else str(_item)
+                        if not _item_text.strip():
+                            continue
+                        _add_result = _sp.run(
+                            ['python3', ADD, _item_text], capture_output=True, text=True, timeout=10
+                        )
+                        if _add_result.stdout.strip():
+                            _added_replies.append(_add_result.stdout.strip())
+                    if _added_replies:
+                        reply = chr(10).join(_added_replies)
+                else:
+                    t = _act.get('text','')
+                    if t:
+                        # 传模型提取的任务文本给add.py解析时间
+                        r = _sp.run(['python3', ADD, t], capture_output=True, text=True, timeout=10)
+                        reply = r.stdout.strip() or reply
             elif a == 'done':
                 r = _sp.run(['python3',DON,str(_act.get('index',1))], capture_output=True, text=True, timeout=10)
                 reply = r.stdout.strip() or reply

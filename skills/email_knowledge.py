@@ -36,6 +36,7 @@ class EmailKnowledgeSkill(Skill):
     def __init__(self, cfg: dict = None):
         super().__init__(cfg)
         self._last_items = self._load_previous_items()
+        self._last_analysis = self._load_previous_analysis()
 
     @staticmethod
     def _load_previous_items():
@@ -48,12 +49,27 @@ class EmailKnowledgeSkill(Skill):
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return []
 
-    def _save_previous_items(self):
+    @staticmethod
+    def _load_previous_analysis():
+        try:
+            payload = json.loads(EMAIL_CONTEXT_FILE.read_text(encoding="utf-8"))
+            if time.time() - float(payload.get("saved_at", 0)) > EMAIL_CONTEXT_TTL_SECONDS:
+                return ""
+            analysis = payload.get("last_analysis", "")
+            return analysis if isinstance(analysis, str) else ""
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return ""
+
+    def _save_previous_items(self, analysis=None):
         try:
             EMAIL_CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
             temporary = EMAIL_CONTEXT_FILE.with_suffix(".tmp")
             temporary.write_text(
-                json.dumps({"saved_at": time.time(), "items": self._last_items}, ensure_ascii=False),
+                json.dumps({
+                    "saved_at": time.time(),
+                    "items": self._last_items,
+                    "last_analysis": self._last_analysis if analysis is None else analysis,
+                }, ensure_ascii=False),
                 encoding="utf-8",
             )
             temporary.replace(EMAIL_CONTEXT_FILE)
@@ -94,6 +110,8 @@ class EmailKnowledgeSkill(Skill):
             text = (response.choices[0].message.content or "").strip()
             if not text or text == "NEW_EMAIL_QUERY":
                 return None
+            self._last_analysis = text
+            self._save_previous_items(analysis=text)
             return text
         except Exception as exc:
             log.warning("previous email analysis failed: %s", exc)
@@ -161,6 +179,7 @@ class EmailKnowledgeSkill(Skill):
                             "WHERE date >= date('now', '-7 days') ORDER BY date DESC"
                         ).fetchall()
                 if rows:
+                    self._last_analysis = ""
                     self._last_items = [
                         {
                             "date": row[0], "sender": row[1], "subject": row[2],
