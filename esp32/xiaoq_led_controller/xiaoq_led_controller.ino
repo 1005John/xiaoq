@@ -9,6 +9,9 @@ namespace {
 WebServer server(80);
 String currentColor = "green";
 const char* REQUEST_HEADERS[] = {"X-XiaoQ-Token"};
+bool mdnsStarted = false;
+unsigned long lastWifiAttemptMs = 0;
+constexpr unsigned long WIFI_RETRY_MS = 10000;
 
 struct Rgb {
   uint8_t red;
@@ -72,21 +75,25 @@ void handleSetColor() {
 
 void connectWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  delay(100);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("Connecting to Wi-Fi %s", WIFI_SSID);
-  for (int attempt = 0; WiFi.status() != WL_CONNECTED && attempt < 40; ++attempt) {
-    delay(250);
-    Serial.print('.');
-  }
+  lastWifiAttemptMs = millis();
+  Serial.printf("Connecting to Wi-Fi %s\n", WIFI_SSID);
+}
+
+void updateWifi() {
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("\nWi-Fi connected: %s\n", WiFi.localIP().toString().c_str());
-    if (MDNS.begin(MDNS_HOSTNAME)) {
+    if (!mdnsStarted) {
+      Serial.printf("Wi-Fi connected: %s\n", WiFi.localIP().toString().c_str());
+      mdnsStarted = MDNS.begin(MDNS_HOSTNAME);
+      if (mdnsStarted) {
       MDNS.addService("http", "tcp", 80);
+      }
     }
-  } else {
-    Serial.printf("\nWi-Fi connection failed (status=%d); retrying in the main loop\n", WiFi.status());
+    return;
+  }
+  if (millis() - lastWifiAttemptMs >= WIFI_RETRY_MS) {
+    WiFi.disconnect();
+    connectWifi();
   }
 }
 
@@ -104,9 +111,7 @@ void setup() {
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWifi();
-  }
   server.handleClient();
+  updateWifi();
   delay(2);
 }
