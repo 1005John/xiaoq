@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 import subprocess
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -22,6 +23,8 @@ log = logging.getLogger("skills.email_knowledge")
 QUERY_SCRIPT = "/home/johnf/.hermes/skills/email/email-knowledge/query.py"
 QUERY_TIMEOUT = 25
 LLM_CONFIG_FILE = Path(QUERY_SCRIPT).parent / "config" / "llm.json"
+EMAIL_CONTEXT_FILE = Path("/home/johnf/xiaoq/data/email_context.json")
+EMAIL_CONTEXT_TTL_SECONDS = 30 * 60
 
 
 class EmailKnowledgeSkill(Skill):
@@ -32,7 +35,30 @@ class EmailKnowledgeSkill(Skill):
 
     def __init__(self, cfg: dict = None):
         super().__init__(cfg)
-        self._last_items = []
+        self._last_items = self._load_previous_items()
+
+    @staticmethod
+    def _load_previous_items():
+        try:
+            payload = json.loads(EMAIL_CONTEXT_FILE.read_text(encoding="utf-8"))
+            if time.time() - float(payload.get("saved_at", 0)) > EMAIL_CONTEXT_TTL_SECONDS:
+                return []
+            items = payload.get("items", [])
+            return items if isinstance(items, list) else []
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return []
+
+    def _save_previous_items(self):
+        try:
+            EMAIL_CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            temporary = EMAIL_CONTEXT_FILE.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps({"saved_at": time.time(), "items": self._last_items}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            temporary.replace(EMAIL_CONTEXT_FILE)
+        except OSError as exc:
+            log.warning("could not save email context: %s", exc)
 
     def _analyze_previous(self, question: str):
         """Answer a follow-up from the previous date result semantically."""
@@ -143,6 +169,7 @@ class EmailKnowledgeSkill(Skill):
                         }
                         for row in rows
                     ]
+                    self._save_previous_items()
                     lines = [f"{row[0]}: {row[2]}" for row in rows]
                     preview = "；".join(row[2] for row in rows[:3])
                     title = f"{target_day.isoformat()}邮件 ({len(rows)}封)" if target_day else f"最近一周邮件 ({len(rows)}封)"
