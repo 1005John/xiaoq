@@ -3617,6 +3617,10 @@ def match_intent(text):
     if matcher and matcher._init_ok:
         skill_name = matcher.match(text)
         if skill_name:
+            # Todo requests need the agent's structured action decision. The
+            # local list skill cannot distinguish mutation intent from a query.
+            if skill_name == "todo":
+                return None
             for intent_id, cfg in INTENT_SKILL_MAP_SEMANTIC.items():
                 if cfg["skill"] == skill_name:
                     return (intent_id, skill_name, cfg["params"])
@@ -3639,6 +3643,10 @@ def match_intent(text):
             "moa": ["MOA", "聊天记录", "聊天", "群聊"],
         }
         fkws = kw_fallback.get(intent_id, [])
+        # Keep todo routing in Hermes so add/done/delete are selected by the
+        # model rather than by the local list skill.
+        if intent_id == "todo_list":
+            continue
         for kw in fkws:
             if kw in text_lower:
                 kl = len(kw)
@@ -4880,14 +4888,19 @@ __REPORT_CONTENT__</body></html>"""
         # JSON指令解析（仅待办操作时执行）
         import subprocess as _sp, json as _j2, re as _re2
         _act = None
-        _m = None
-        if any(w in txt for w in ["添加","完成","删除"]):
-            _m = _re2.search(r'\{"action"\s*:\s*"(\w+)"[^}]*\}', reply)
-        if _m:
+        # Parse an action object wherever the model placed it (plain text or
+        # a fenced response), without inspecting the user's wording.
+        _decoder = _j2.JSONDecoder()
+        for _match in _re2.finditer(r'\{', reply or ''):
             try:
-                _act = _j2.loads(_m.group(0))
-                reply = reply.replace(_m.group(0), '').strip()
-            except: pass
+                _candidate, _end = _decoder.raw_decode((reply or '')[_match.start():])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(_candidate, dict) and _candidate.get("action") in {"add", "done", "delete", "query"}:
+                _act = _candidate
+                _raw_action = (reply or '')[_match.start():_match.start() + _end]
+                reply = reply.replace(_raw_action, '').strip()
+                break
         if _act:
             a = _act.get('action','')
             ADD = os.path.expanduser('~/xiaoq/hermes_skills/add.py')
