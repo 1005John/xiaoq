@@ -3530,14 +3530,43 @@ def match_intent(text):
 
     # ESP32 RGB 灯采用明确关键词直达，避免被通用语义路由误判。
     led_colors = {
-        "红": "red", "绿色": "green", "绿": "green", "蓝": "blue",
+        "红色": "red", "绿色": "green", "蓝色": "blue",
+        "白色": "white", "黄色": "yellow", "紫色": "purple",
+        "红": "red", "绿": "green", "蓝": "blue",
         "白": "white", "黄": "yellow", "紫": "purple",
     }
-    device_match = re.search(r"(?:第)?\s*(\d+)\s*号?\s*(?:esp32|设备|开发板|灯)?", text_lower)
+    led_color_pattern = "红色|绿色|蓝色|白色|黄色|紫色|红|绿|蓝|白|黄|紫"
+    # A device ID is written as "1号". Requiring 号 prevents ESP32's model
+    # suffix from being mistaken for device 32 in color-reference phrases.
+    device_match = re.search(r"(?:第)?\s*(\d+)\s*号(?:\s*(?:esp32|设备|开发板|灯))?", text_lower)
     led_device_id = device_match.group(1) if device_match else "1"
+    target_match = re.search(
+        rf"(?:变成|改成|调成|设置成|变为|换成)\s*({led_color_pattern})", text_lower
+    )
+    target_color = led_colors.get(target_match.group(1)) if target_match else None
+    reference_match = re.search(
+        rf"({led_color_pattern})\s*(?:对应(?:的)?(?:编号|设备|esp32)?|的\s*(?:esp32|设备))",
+        text_lower,
+    )
+    reference_color = led_colors.get(reference_match.group(1)) if reference_match else None
+    if reference_color and not device_match:
+        try:
+            from skills.esp32_led import find_unique_device_by_color
+            matched_device = find_unique_device_by_color(reference_color)
+            if matched_device:
+                led_device_id = matched_device
+        except Exception:
+            matched_device = None
     if "关灯" in text_lower or "关闭灯" in text_lower:
         return ("esp32_led", "esp32_led", {"color": "off", "device_id": led_device_id})
     if any(keyword in text_lower for keyword in ("esp32", "led", "灯光", "小q灯", "小q 的灯", "小q的灯", "变灯", "把灯")):
+        if target_color:
+            if reference_color and not device_match and not matched_device:
+                return ("esp32_led", "esp32_led", {
+                    "color": target_color,
+                    "reference_color": reference_color,
+                })
+            return ("esp32_led", "esp32_led", {"color": target_color, "device_id": led_device_id})
         for keyword, color in led_colors.items():
             if keyword in text_lower:
                 return ("esp32_led", "esp32_led", {"color": color, "device_id": led_device_id})

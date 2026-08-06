@@ -8,6 +8,7 @@ import hmac
 import html
 import json
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -33,6 +34,7 @@ MEETING_ARCHIVE = MEETING_ROOT / "archive"
 MEETING_OUTPUT = MEETING_ROOT / "output"
 MEETING_JOBS = MEETING_ROOT / "jobs"
 CHAT_ROOT = MOBILE_ROOT / "chat"
+ESP32_LED_STATE_PATH = DATA_ROOT / "esp32_led_state.json"
 TODOS_PATH = DATA_ROOT / "todos.json"
 PORT = int(os.environ.get("XIAOQ_MOBILE_PORT", "8788"))
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
@@ -96,6 +98,41 @@ def read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def record_visual_led_state(reply: str) -> str:
+    """Persist only MiMo's explicit, machine-readable ESP32 observations."""
+    match = re.search(r"\[\[ESP32_STATE:(\{.*?\})\]\]", reply, flags=re.DOTALL)
+    if not match:
+        return reply.strip()
+    visible_reply = (reply[:match.start()] + reply[match.end():]).strip()
+    try:
+        observations = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return visible_reply
+    if not isinstance(observations, dict):
+        return visible_reply
+
+    valid_colors = {"red", "green", "blue", "white", "yellow", "purple", "off"}
+    state = read_json(ESP32_LED_STATE_PATH)
+    devices = state.setdefault("devices", {}) if isinstance(state, dict) else {}
+    if not isinstance(devices, dict):
+        devices = state["devices"] = {}
+    changed = False
+    for device_id, color in observations.items():
+        if not str(device_id).isdigit() or color not in valid_colors:
+            continue
+        previous = devices.get(str(device_id), {})
+        devices[str(device_id)] = {
+            "name": str(previous.get("name") or f"{device_id}号ESP32"),
+            "color": color,
+            "source": "vision",
+            "updated_at": iso_now(),
+        }
+        changed = True
+    if changed:
+        write_json(ESP32_LED_STATE_PATH, state)
+    return visible_reply
 
 
 def meeting_tasks(filename: str) -> list[str]:
@@ -242,7 +279,7 @@ def vision_reply(question: str, frame: bytes) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "你是小Q的视觉助手。根据摄像头当前画面回答用户问题；看不清或画面没有依据时要明确说明，不要猜测。回答简洁、自然。",
+                "content": '你是小Q的视觉助手。根据摄像头当前画面回答用户问题；看不清或画面没有依据时要明确说明，不要猜测。回答简洁、自然。若且仅若能清晰看见带有ESP32-N或N号ESP32标签的设备及其LED颜色，在回答末尾附加一行[[ESP32_STATE:{"N":"red"}]]，用实际编号和英文颜色red、green、blue、white、yellow、purple、off替换示例。标签或颜色不清晰时绝不附加该标记。',
             },
             {
                 "role": "user",
@@ -499,7 +536,7 @@ def vision_chat():
         return jsonify({"ok": False, "error": "text must contain 2-2000 characters"}), 400
     try:
         frame = camera_stream.snapshot()
-        reply = vision_reply(text, frame)
+        reply = record_visual_led_state(vision_reply(text, frame))
     except RuntimeError as exc:
         app.logger.warning("vision chat failed: %s", exc)
         status_code = 503 if "camera" in str(exc).lower() else 502

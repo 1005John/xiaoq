@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,26 @@ from .base import SideEffect, Skill, SkillResult
 DEFAULT_URL = "http://xiaoq-led.local"
 DEFAULT_DEVICE_ID = "1"
 SUPPORTED_COLORS = {"red", "green", "blue", "white", "yellow", "purple", "off"}
+DEFAULT_STATE_PATH = "data/esp32_led_state.json"
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def find_unique_device_by_color(color: str) -> str | None:
+    """Return a device ID only when the last observed color is unambiguous."""
+    path = Path(os.environ.get("XIAOQ_ESP32_LED_STATE", DEFAULT_STATE_PATH))
+    devices = _read_json(path).get("devices", {})
+    if not isinstance(devices, dict):
+        return None
+    matches = [str(device_id) for device_id, value in devices.items()
+               if isinstance(value, dict) and value.get("color") == color]
+    return matches[0] if len(matches) == 1 else None
 
 
 class Esp32LedSkill(Skill):
@@ -22,11 +43,23 @@ class Esp32LedSkill(Skill):
     description = "控制小Q局域网 ESP32 RGB 灯颜色"
 
     def _read_config(self, path: Path) -> dict:
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            value = {}
-        return value if isinstance(value, dict) else {}
+        return _read_json(path)
+
+    def _record_color(self, device_id: str, device_name: str, color: str) -> None:
+        path = Path(os.environ.get("XIAOQ_ESP32_LED_STATE", DEFAULT_STATE_PATH))
+        state = _read_json(path)
+        devices = state.setdefault("devices", {})
+        if not isinstance(devices, dict):
+            devices = state["devices"] = {}
+        devices[device_id] = {
+            "name": device_name,
+            "color": color,
+            "source": "control",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
 
     def _config(self, device_id: str) -> dict[str, str]:
         registry_path = Path(os.environ.get(
@@ -52,8 +85,19 @@ class Esp32LedSkill(Skill):
         }
 
     def execute(self, params: dict = None) -> SkillResult:
-        color = str((params or {}).get("color", "green")).lower()
-        device_id = str((params or {}).get("device_id", DEFAULT_DEVICE_ID))
+        params = params or {}
+        color = str(params.get("color", "green")).lower()
+        device_id = str(params.get("device_id", DEFAULT_DEVICE_ID))
+        reference_color = str(params.get("reference_color", "")).lower()
+        if reference_color:
+            return SkillResult(
+                success=True,
+                data={"reference_color": reference_color},
+                side_effects=[SideEffect(
+                    "voice_tts",
+                    {"text": f"没有唯一的{self._color_name(reference_color)}ESP32，请告诉我设备编号。"},
+                )],
+            )
         if color not in SUPPORTED_COLORS:
             return SkillResult(success=False, error="unsupported LED color")
         config = self._config(device_id)
@@ -80,6 +124,7 @@ class Esp32LedSkill(Skill):
         if not result.get("ok"):
             return SkillResult(success=False, error=str(result.get("error", "ESP32 LED rejected request")))
         target = config["name"]
+        self._record_color(device_id, target, color)
         spoken = f"已关闭{target}灯光" if color == "off" else f"已把{target}调成{self._color_name(color)}"
         return SkillResult(
             success=True,
