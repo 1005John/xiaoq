@@ -26,7 +26,7 @@ def _read_json(path: Path) -> dict:
 
 def _extract_filename(text: str) -> str | None:
     match = re.search(
-        r"桌面(?:上有一个|上的|的|上)?\s*([^\s，。,。！？!?\"“”‘’「」『』]+\.(?:txt|md|log|csv|json))",
+        r"桌面(?:上的|的|上)?(?:[，,。]\s*)?(?:有一个\s*)?([^\s，。,。！？!?\"“”‘’「」『』]+\.(?:txt|md|log|csv|json))",
         text,
         flags=re.IGNORECASE,
     )
@@ -55,8 +55,14 @@ def _extract_content(text: str) -> str | None:
     if not match:
         return None
     content = text[match.end():].strip()
-    content = content.strip(" \t\"'“”‘’「」『』")
-    content = content.rstrip("。！？!?")
+    quote_pairs = {"“": "”", "‘": "’", "「": "」", "『": "』", "\"": "\"", "'": "'"}
+    if content and content[0] in quote_pairs:
+        closing = quote_pairs[content[0]]
+        end = content.find(closing, 1)
+        if end != -1:
+            return content[1:end].strip() or None
+    content = re.split(r"(?:[，,。]\s*)?(?:然后)?(?:保存|关闭|退出|完成)", content, maxsplit=1)[0]
+    content = content.strip(" \t\"'“”‘’「」『』").rstrip("。！？!?")
     return content or None
 
 
@@ -93,18 +99,30 @@ class RemoteLaptopSkill(Skill):
         script = (
             "$relative=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + relative_b64 + "'));"
             "$value=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + content_b64 + "'));"
-            "$path=Join-Path (Join-Path $env:USERPROFILE 'Desktop') $relative;"
+            "$desktop=(Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders' -Name Desktop -ErrorAction SilentlyContinue).Desktop;"
+            "if([string]::IsNullOrWhiteSpace($desktop)){$desktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)}else{$desktop=[Environment]::ExpandEnvironmentVariables($desktop)};"
+            "$path=Join-Path $desktop $relative;"
             "$encoding=New-Object Text.UTF8Encoding($false);"
             "[IO.File]::AppendAllText($path, $value + [Environment]::NewLine, $encoding);"
             "Write-Output 'XIAOQ_OK'"
         )
+        encoded_script = base64.b64encode(script.encode("utf-16le")).decode("ascii")
         target = f"{user}@{host}"
         command = [
             "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-            target, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script,
+            target, "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded_script,
         ]
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            # Windows OpenSSH may emit the host's local code page on stderr;
+            # decode defensively so a successful marker on stdout is usable.
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return SkillResult(success=False, error=f"SSH 连接笔记本失败: {exc}")
         if result.returncode != 0 or "XIAOQ_OK" not in result.stdout:
