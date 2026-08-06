@@ -3542,6 +3542,17 @@ def match_intent(text):
         return None
     text_lower = text.lower()
 
+    # Test-dispatch and test-analysis requests are handled by Hermes skills.
+    # Do this before the legacy "测试" fallback below, which otherwise routes
+    # every test-related sentence to the unrelated local bug-query skill.
+    hermes_test_skill_hints = (
+        "at测试", "oc测试", "opencpu", "仪表测试", "综测仪",
+        "下发测试", "测试任务", "测试设备", "测试技能",
+        "测试结果分析", "深度分析",
+    )
+    if any(hint in text_lower for hint in hermes_test_skill_hints):
+        return None
+
     # Handle explicit laptop file requests before generic keywords such as
     # "天气" can route the same sentence to the weather skill.
     remote_hints = ("ssh", "远程登录", "登录笔记本", "登录电脑", "操作笔记本", "操作电脑")
