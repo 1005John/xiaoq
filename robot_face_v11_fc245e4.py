@@ -5299,7 +5299,7 @@ os.environ['AUDIODEV'] = '/dev/null'
 pygame.init()
 pygame.freetype.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
-pygame.display.set_caption("Robot Face v9 + NPC + VFX + Body + Eyes + Ambient")
+pygame.display.set_caption("XiaoQ Unified v11")
 clock = pygame.time.Clock()
 
 sm = StateMachine()
@@ -5459,7 +5459,7 @@ last_click_time = 0
 
 running = True
 show_hud = False  # v9: 调试HUD开关(F1切换)
-print("Robot Face v9 started. WS:8766 | 1-9表情 | SPACE=NPC/auto | P=人格 | V=VFX | B=Squash | M=情绪 | F1=HUD | ESC=quit")
+print("XiaoQ Unified v11 started. WS:8766 | 1-9表情 | SPACE=NPC/auto | P=人格 | V=VFX | B=Squash | M=情绪 | F1=HUD | ESC=quit")
 print(f"[NPC] 人格: {PERSONALITY_PRESETS[personality_idx][0]} {personality}")
 print("WS指令: {\"type\":\"expression\",\"name\":\"happy\"}")
 print("WS指令: {\"type\":\"set_state\",\"state\":\"idle|observe|engaged|warn|sleep|listening|thinking|talking\"}")
