@@ -3966,8 +3966,12 @@ class VoiceManager:
             # A follow-up such as "这里面有需要重点关注的吗" has no
             # standalone email keyword. Keep the previous skill in context
             # and let the email skill's model decide whether it is related.
-            if not intent and _CONTEXT.get("last_skill") == "email_knowledge":
-                intent = ("email_followup", "email_knowledge", {})
+            if not intent:
+                _email_mgr = getattr(self, "_l3_skill_mgr", None)
+                _email_skill = getattr(_email_mgr, "_skills", {}).get("email_knowledge") if _email_mgr else None
+                if (_CONTEXT.get("last_skill") == "email_knowledge"
+                        or getattr(_email_skill, "_last_items", None)):
+                    intent = ("email_followup", "email_knowledge", {})
             if intent:
                 intent_id, skill_name, skill_params = intent
                 print(f"[L3] Intent matched: {intent_id} → skill '{skill_name}'")
@@ -4160,8 +4164,12 @@ class VoiceManager:
             # A follow-up such as "这里面有需要重点关注的吗" has no
             # standalone email keyword. Keep the previous skill in context
             # and let the email skill's model decide whether it is related.
-            if not intent and _CONTEXT.get("last_skill") == "email_knowledge":
-                intent = ("email_followup", "email_knowledge", {})
+            if not intent:
+                _email_mgr = getattr(self, "_l3_skill_mgr", None)
+                _email_skill = getattr(_email_mgr, "_skills", {}).get("email_knowledge") if _email_mgr else None
+                if (_CONTEXT.get("last_skill") == "email_knowledge"
+                        or getattr(_email_skill, "_last_items", None)):
+                    intent = ("email_followup", "email_knowledge", {})
             if intent:
                 intent_id, skill_name, skill_params = intent
                 print(f"[L3] Intent matched: {intent_id} → skill '{skill_name}'")
