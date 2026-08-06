@@ -13,7 +13,8 @@ Environment=WAYLAND_DISPLAY=wayland-0
 Environment=SDL_VIDEODRIVER=wayland
 Environment=XIAOQ_AUTO_FACE_TRACKING=1
 ExecStart=/home/johnf/xiaoq/start_xiaoq.sh
-Restart=always
+# A normal Q exit should leave XiaoQ stopped; crashes still recover.
+Restart=on-failure
 RestartSec=3
 
 [Install]
