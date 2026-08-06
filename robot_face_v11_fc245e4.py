@@ -3896,7 +3896,7 @@ class VoiceManager:
         return reply, llm_ms
 
     def process_voice(self, wav_path):
-        """[实验] 语音流水线: ASR -> 人名纠错 -> 直连LLM -> TTS (Bypass L3)"""
+        """语音流水线: ASR -> 人名纠错 -> shared skill routing -> TTS."""
         if self._pending:
             print("[Voice] Already processing, skipping")
             return
@@ -3948,10 +3948,10 @@ class VoiceManager:
             txt = correct(txt)
             t_asr_end = time.time()
 
-            # 直接调 Hermes Agent，由其内部自主判断意图、调用技能或纯聊天
-            # _call_hermes 内部已包含 TTS，所以这里不需要再调 TTS
+            # Use the same routing path as injected/mobile text so voice
+            # requests can invoke local skills (email, ESP32, SSH, etc.).
             self._pending = False
-            self._call_hermes(txt)
+            self.process_text(txt, speak=True)
             return
             # ── 原 L3 流程已跳过 ──
             intent = match_intent(txt)
