@@ -118,6 +118,7 @@ class SkillManager:
         from .email_knowledge import EmailKnowledgeSkill
         from .wechat_knowledge import WechatKnowledgeSkill
         from .esp32_led import Esp32LedSkill
+        from .remote_laptop import RemoteLaptopSkill
 
         cfg = cfg or {}
         self.register(TodoSkill(cfg.get("todo", {})))
@@ -131,4 +132,5 @@ class SkillManager:
         self.register(EmailKnowledgeSkill(cfg.get("email_knowledge", {})))
         self.register(WechatKnowledgeSkill(cfg.get("wechat_knowledge", {})))
         self.register(Esp32LedSkill())
+        self.register(RemoteLaptopSkill())
         return self

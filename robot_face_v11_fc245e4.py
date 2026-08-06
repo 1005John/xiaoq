@@ -3528,6 +3528,13 @@ def match_intent(text):
         return None
     text_lower = text.lower()
 
+    # Handle explicit laptop file requests before generic keywords such as
+    # "天气" can route the same sentence to the weather skill.
+    remote_hints = ("ssh", "远程登录", "登录笔记本", "登录电脑", "操作笔记本", "操作电脑")
+    file_hints = ("桌面", "文件", "文档", "写上", "写入", "打开")
+    if any(hint in text_lower for hint in remote_hints) and any(hint in text_lower for hint in file_hints):
+        return ("remote_laptop", "remote_laptop", {"_asr_text": text})
+
     # ESP32 RGB 灯采用明确关键词直达，避免被通用语义路由误判。
     led_colors = {
         "红色": "red", "绿色": "green", "蓝色": "blue",
