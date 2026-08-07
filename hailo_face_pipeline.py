@@ -172,17 +172,18 @@ def _callback(element, buf, udata: _CallbackData):
             q.put_nowait(results)
         except queue.Full:
             pass
-        # The hand recognizer consumes a copy of this same GStreamer frame.
-        # Keeping it in the existing pipeline avoids opening a second camera.
-        if udata.frame_callback is not None:
-            try:
-                pad = element.get_static_pad("src")
-                fmt, width, height = get_caps_from_pad(pad)
-                if fmt and width and height:
-                    frame = get_numpy_from_buffer(buf, fmt, width, height)
-                    udata.frame_callback(frame, results)
-            except Exception as exc:
-                log.debug("frame callback skipped: %s", exc)
+    # Export every frame to the mobile stream. Limiting this to detected faces
+    # made the phone camera take exclusive ownership whenever no face was in
+    # view, which stopped Hailo tracking and hid the P/T HUD.
+    if udata.frame_callback is not None:
+        try:
+            pad = element.get_static_pad("src")
+            fmt, width, height = get_caps_from_pad(pad)
+            if fmt and width and height:
+                frame = get_numpy_from_buffer(buf, fmt, width, height)
+                udata.frame_callback(frame, results)
+        except Exception as exc:
+            log.debug("frame callback skipped: %s", exc)
 
 
 class HailoFacePipeline:

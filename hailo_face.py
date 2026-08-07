@@ -53,13 +53,13 @@ class HailoFace:
         self._track_thread.start()
 
     def _on_pipeline_frame(self, frame, detections):
-        """Forward the existing camera frame to optional secondary inference."""
-        if self.frame_callback is None or not detections:
+        """Forward every camera frame; a face box is optional."""
+        if self.frame_callback is None:
             return
         try:
-            best = max(detections, key=lambda item: item.confidence)
-            if best.confidence >= 0.3:
-                self.frame_callback(frame, best.bbox)
+            best = max(detections, key=lambda item: item.confidence) if detections else None
+            bbox = best.bbox if best is not None and best.confidence >= 0.3 else None
+            self.frame_callback(frame, bbox)
         except Exception as exc:
             print(f"[HailoFace] frame callback error: {exc}")
 
@@ -74,46 +74,57 @@ class HailoFace:
 
     def _run_tracking(self):
         """渐进追踪逻辑, 复用 BaiduFace 的追踪策略"""
-
-        # Phase 1: sweep [90, 70, 110] 找脸
-        found = False
-        if self.gimbal:
-            for pan in [90, 70, 110]:
-                if not self.running:
+        # Keep cycling between sweep and tracking. A single missed sweep must
+        # not permanently disable the pipeline or the P/T status HUD.
+        while self.running:
+            found = False
+            while not self._queue.empty():
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
                     break
-                self.gimbal.move_to(pan, TC, 400, blocking=True)
-                # 在当前角度等 1.5s, 期间检查 queue
-                t0 = time.time()
-                while time.time() - t0 < 1.5:
+
+            # Phase 1: sweep [90, 70, 110] 找脸
+            if self.gimbal:
+                for pan in [90, 70, 110]:
                     if not self.running:
                         break
-                    try:
-                        detections = self._queue.get(timeout=0.2)
-                        if detections:
-                            try:
-                                target_pan, target_tilt = self._face_to_angles(detections)
-                            except Exception as e:
-                                print(f"[HailoFace] _face_to_angles error: {e}, detections={detections}")
-                                continue
-                            if target_pan is not None:
-                                self.face_pan = target_pan
-                                self.face_tilt = target_tilt
-                                self.face_detected = True
-                                print(f"[HailoFace] FOUND sweep pan={pan} "
-                                      f"-> pan={target_pan:.0f} tilt={target_tilt:.0f}")
-                                found = True
-                                break
-                    except queue.Empty:
-                        pass
-                if found:
-                    break
+                    self.gimbal.move_to(pan, TC, 400, blocking=True)
+                    t0 = time.time()
+                    while time.time() - t0 < 1.5 and self.running:
+                        try:
+                            detections = self._queue.get(timeout=0.2)
+                        except queue.Empty:
+                            continue
+                        if not detections:
+                            continue
+                        try:
+                            target_pan, target_tilt = self._face_to_angles(detections)
+                        except Exception as exc:
+                            print(f"[HailoFace] _face_to_angles error: {exc}, detections={detections}")
+                            continue
+                        if target_pan is not None:
+                            self.face_pan = target_pan
+                            self.face_tilt = target_tilt
+                            self.face_detected = True
+                            print(f"[HailoFace] FOUND sweep pan={pan} "
+                                  f"-> pan={target_pan:.0f} tilt={target_tilt:.0f}")
+                            found = True
+                            break
+                    if found:
+                        break
 
-        # Phase 2: incremental tracking (pan + tilt)
-        if found:
+            if not self.running:
+                break
+            if not found:
+                self.face_detected = False
+                time.sleep(0.2)
+                continue
+
+            # Phase 2: incremental tracking (pan + tilt)
             cur_pan = float(self.face_pan)
             cur_tilt = float(self.face_tilt)
             lost = 0
-
             while self.running:
                 try:
                     detections = self._queue.get(timeout=0.15)
@@ -124,13 +135,12 @@ class HailoFace:
                     lost = 0
                     try:
                         target_pan, target_tilt = self._face_to_angles(detections)
-                    except Exception as e:
-                        print(f"[HailoFace] _face_to_angles error: {e}")
+                    except Exception as exc:
+                        print(f"[HailoFace] _face_to_angles error: {exc}")
                         continue
                     if target_pan is not None:
                         target_pan = max(PAN_MIN, min(PAN_MAX, target_pan))
                         target_tilt = max(TILT_MIN, min(TILT_MAX, target_tilt))
-                        # 渐进追踪
                         cur_pan += (target_pan - cur_pan) * 0.25
                         cur_tilt += (target_tilt - cur_tilt) * 0.25
                         cur_pan = max(PAN_MIN, min(PAN_MAX, cur_pan))
@@ -139,20 +149,19 @@ class HailoFace:
                         self.face_tilt = cur_tilt
                         self.face_detected = True
                         if self.gimbal:
-                            self.gimbal.move_to(
-                                int(cur_pan), int(cur_tilt), 200, blocking=False)
+                            self.gimbal.move_to(int(cur_pan), int(cur_tilt), 200, blocking=False)
                 else:
                     lost += 1
                     if lost >= 5:
                         self.face_detected = False
-                    if lost >= 20:  # ~3s 无脸 → 放弃
+                    if lost >= 20:  # ~3s 无脸 -> 重新扫描
                         break
-
                 time.sleep(0.05)
 
-        # 清理
+            self.face_detected = False
+            time.sleep(0.1)
+
         self.face_detected = False
-        self.stop()
         print("[HailoFace] Exit")
 
     def _face_to_angles(self, detections):

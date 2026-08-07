@@ -5594,9 +5594,10 @@ _last_shared_frame_write = 0.0
 
 def _on_face_frame_for_gesture(frame, face_bbox):
     global _last_shared_frame_write
-    if _gesture_photo is None:
+    if frame is None:
         return
-    _gesture_photo.submit_frame(frame, face_bbox)
+    if _gesture_photo is not None and face_bbox is not None:
+        _gesture_photo.submit_frame(frame, face_bbox)
     # mobile_control.py can serve this frame without opening a second camera.
     now = time.monotonic()
     if now - _last_shared_frame_write >= 0.20:
