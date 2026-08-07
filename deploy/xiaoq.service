@@ -12,6 +12,7 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=SDL_VIDEODRIVER=wayland
 Environment=XIAOQ_AUTO_FACE_TRACKING=1
+Environment=XIAOQ_GESTURE_ENABLED=1
 ExecStart=/home/johnf/xiaoq/start_xiaoq.sh
 # A normal Q exit should leave XiaoQ stopped; crashes still recover.
 Restart=on-failure
