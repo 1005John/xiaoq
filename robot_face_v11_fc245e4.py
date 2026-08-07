@@ -3804,12 +3804,12 @@ class VoiceManager:
         if not text: return
         if voice is None:
             try:
-                voice = "苏打" if face_style == 'cute' else "冰糖"
+                voice = _get_active_persona().get("voice", "冰糖")
             except:
                 voice = "冰糖"
 
         _model = "mimo-v2.5-tts"
-        _sys_prompt = "用自然亲切的中文女声播报"
+        _sys_prompt = _get_active_persona().get("tts_prompt", "用自然亲切的中文女声播报")
         print(f"[TTS] {_model} ({voice}): {text[:40]}...")
         if on_start: on_start()
         if self.proc:
@@ -3943,13 +3943,12 @@ class VoiceManager:
             if not _llm_api_key:
                 _llm_api_key = _llm_os.environ.get("XIAOMI_MIMO_API_KEY", "")
             
-            messages = []
+            messages = [{"role": "system", "content": "你是语音助手小Q，用简洁口语回答，50字以内。" + _get_persona_instruction()}]
             if is_context_prompt:
                 for h in self._history[-4:]:
                     messages.append({"role": h["role"], "content": h["content"]})
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "system", "content": "你是语音助手小Q，用简洁口语回答，50字以内。"})
                 for h in self._history[-4:]:
                     messages.append({"role": h["role"], "content": h["content"]})
                 messages.append({"role": "user", "content": prompt})
@@ -4401,6 +4400,8 @@ class VoiceManager:
                     "{\"action\":\"delete\",\"index\":\"all\"}（删除全部）。"
                 )
 
+            # 技能约束保留，同时叠加当前人格的表达方式。
+            _sys1 += _get_persona_instruction()
             if _skill_data:
                 _user_msg = f"数据：\n{_skill_data}\n\n用户问：{txt}\n\n请根据数据回答"
             else:
@@ -4925,6 +4926,7 @@ __REPORT_CONTENT__</body></html>"""
                         _skill_result = ""
 
                     # ── LLM 生成回答 ──
+                    _sys += _get_persona_instruction()
                     _messages = [{"role":"system","content":_sys}]
                     # 带上最近2轮对话历史
                     if hasattr(self, '_chat_history'):
@@ -5419,6 +5421,48 @@ cute_renderer = CuteRenderer(screen)
 cute_ambient_mgr = CuteAmbientManager(WIDTH // 2, HEIGHT // 2)
 face_style = 'neon'
 
+# 人物蒸馏后的本地人格配置：F2 会原子切换整套配置，而不是只换脸。
+# awesome-persona-skills 提供的是方法/项目索引，运行时人格在这里落地。
+PERSONA_PROFILES = [
+    {
+        "name": "霓虹分析师",
+        "face_style": "neon",
+        "voice": "冰糖",
+        "npc_factory": Personality.energetic,
+        "switch_expression": "excited",
+        "tts_prompt": "用清晰利落、略带科技感的中文女声播报，语速偏快但吐字清楚",
+        "instruction": (
+            "当前人格是霓虹分析师：理性、直接、重视事实和可执行步骤。"
+            "回答先给结论，再给必要细节；避免空话，技术问题使用准确术语；"
+            "语气干练，允许少量科技感表达。"
+        ),
+    },
+    {
+        "name": "可爱陪伴者",
+        "face_style": "cute",
+        "voice": "苏打",
+        "npc_factory": Personality.gentle,
+        "switch_expression": "smile",
+        "tts_prompt": "用温暖柔和、亲切有活力的中文女声播报，语气自然，带一点可爱感",
+        "instruction": (
+            "当前人格是可爱陪伴者：温柔、耐心、善于鼓励和解释。"
+            "先回应用户的感受，再给清晰建议；表达自然亲切，可以有少量轻松语气，"
+            "但涉及操作、风险和事实时必须准确，不要过度卖萌。"
+        ),
+    },
+]
+active_persona_idx = 0
+
+def _get_active_persona():
+    """返回当前完整人格配置，供 TTS、LLM 和界面切换共同使用。"""
+    try:
+        return PERSONA_PROFILES[active_persona_idx % len(PERSONA_PROFILES)]
+    except (NameError, IndexError):
+        return {"name": "霓虹分析师", "voice": "冰糖", "instruction": ""}
+
+def _get_persona_instruction():
+    return " " + _get_active_persona().get("instruction", "")
+
 def _get_active_sm():
     return sm_cute if face_style == 'cute' else sm
 
@@ -5496,7 +5540,8 @@ PERSONALITY_PRESETS = [
     ("默认中性", Personality),
 ]
 personality_idx = 0
-personality = PERSONALITY_PRESETS[personality_idx][1]()
+# F2 人格是唯一的整套切换入口；NPC 参数从当前人格初始化。
+personality = _get_active_persona()["npc_factory"]()
 npc_sm = NPCStateMachine(sm, personality)
 npc_enabled = True
 sm.auto_mode = False
@@ -5511,8 +5556,8 @@ last_click_time = 0
 
 running = True
 show_hud = False  # v9: 调试HUD开关(F1切换)
-print("XiaoQ Unified v11 started. WS:8766 | 1-9表情 | SPACE=NPC/auto | P=人格 | V=VFX | B=Squash | M=情绪 | F1=HUD | ESC=quit")
-print(f"[NPC] 人格: {PERSONALITY_PRESETS[personality_idx][0]} {personality}")
+print("XiaoQ Unified v11 started. WS:8766 | 1-9表情 | SPACE=NPC/auto | P=NPC行为 | V=VFX | B=Squash | M=情绪 | F1=HUD | F2=完整人格 | ESC=quit")
+print(f"[Persona] 当前: {_get_active_persona()['name']} | 音色: {_get_active_persona()['voice']} | {personality}")
 print("WS指令: {\"type\":\"expression\",\"name\":\"happy\"}")
 print("WS指令: {\"type\":\"set_state\",\"state\":\"idle|observe|engaged|warn|sleep|listening|thinking|talking\"}")
 print("WS指令: {\"type\":\"npc_interact\",\"interaction\":\"touch|voice|long_press|double_tap\"}")
@@ -5697,18 +5742,24 @@ while running:
                 # F1: 切换调试HUD
                 show_hud = not show_hud
             elif event.key == pygame.K_F2:
-                # F2: 切换可爱/霓虹风格
-                if face_style == 'neon':
-                    face_style = 'cute'
+                # F2: 原子切换完整人格（语言风格、表情、NPC行为、TTS音色）
+                active_persona_idx = (active_persona_idx + 1) % len(PERSONA_PROFILES)
+                _persona = _get_active_persona()
+                face_style = _persona["face_style"]
+                if face_style == 'cute':
                     sm = sm_cute
-                    print("[Style] 可爱自信风")
+                    print(f"[Persona] 切换: {_persona['name']} | 表情: cute")
                 else:
-                    face_style = 'neon'
                     sm = StateMachine()
-                    print("[Style] 霓虹赛博风")
+                    print(f"[Persona] 切换: {_persona['name']} | 表情: neon")
                 if npc_sm:
                     npc_sm.sm = sm
+                    npc_sm.personality = _persona["npc_factory"]()
+                    npc_sm.idle_time = 0
                 sm.gimbal = gimbal_ctrl if gimbal_ctrl else None
+                sm.trigger(_persona.get("switch_expression", "happy"))
+                _get_active_ambient().set_mood("excited" if face_style == "neon" else "love")
+                print(f"[Persona] 语言/音色已切换: {_persona['name']} / {_persona['voice']}")
             elif event.key == pygame.K_F12:
                 # v10: F12截图
                 ts = __import__('time').strftime('%H%M%S')
