@@ -32,6 +32,7 @@ from hailo_apps.python.core.gstreamer.gstreamer_helper_pipelines import (
     INFERENCE_PIPELINE, INFERENCE_PIPELINE_WRAPPER,
     TRACKER_PIPELINE, USER_CALLBACK_PIPELINE,
 )
+from hailo_apps.python.core.common.buffer_utils import get_caps_from_pad, get_numpy_from_buffer
 from hailo_apps.python.core.common.defines import (
     RESOURCES_SO_DIR_NAME, FACE_RECOGNITION_PIPELINE,
     FACE_DETECTION_POSTPROCESS_SO_FILENAME,
@@ -56,9 +57,10 @@ class FaceDetection:
 
 
 class _CallbackData(app_callback_class):
-    def __init__(self, q):
+    def __init__(self, q, frame_callback=None):
         super().__init__()
         self.q = q
+        self.frame_callback = frame_callback
 
 
 class _HeadlessApp(GStreamerApp):
@@ -96,6 +98,7 @@ class _HeadlessApp(GStreamerApp):
         det = INFERENCE_PIPELINE(
             hef_path=self.hef_det, post_process_so=self.post_so,
             post_function_name=self.det_func, batch_size=1,
+            multi_process_service="true",
             config_json=get_resource_path(
                 pipeline_name=None, resource_type=RESOURCES_JSON_DIR_NAME,
                 arch=self.arch, model=FACE_DETECTION_JSON_NAME))
@@ -169,11 +172,23 @@ def _callback(element, buf, udata: _CallbackData):
             q.put_nowait(results)
         except queue.Full:
             pass
+        # The hand recognizer consumes a copy of this same GStreamer frame.
+        # Keeping it in the existing pipeline avoids opening a second camera.
+        if udata.frame_callback is not None:
+            try:
+                pad = element.get_static_pad("src")
+                fmt, width, height = get_caps_from_pad(pad)
+                if fmt and width and height:
+                    frame = get_numpy_from_buffer(buf, fmt, width, height)
+                    udata.frame_callback(frame, results)
+            except Exception as exc:
+                log.debug("frame callback skipped: %s", exc)
 
 
 class HailoFacePipeline:
-    def __init__(self, q: queue.Queue):
+    def __init__(self, q: queue.Queue, frame_callback=None):
         self.q = q
+        self.frame_callback = frame_callback
         self._app = None
         self._thread = None
         self._running = False
@@ -181,7 +196,7 @@ class HailoFacePipeline:
     def start(self):
         if self._running:
             return
-        udata = _CallbackData(self.q)
+        udata = _CallbackData(self.q, self.frame_callback)
         parser = get_pipeline_parser()
         self._app = _HeadlessApp(_callback, udata, parser=parser)
         self._running = True

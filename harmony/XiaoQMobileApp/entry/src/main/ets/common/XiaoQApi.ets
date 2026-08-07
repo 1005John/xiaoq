@@ -47,6 +47,13 @@ export interface VisionResponse extends ChatResponse {
   model: string
 }
 
+export interface PhotoStatus {
+  ok: boolean
+  available: boolean
+  filename: string
+  captured_at: string
+}
+
 interface TodoItem {
   id: number
 }
@@ -66,6 +73,10 @@ export class XiaoQApi {
 
   static streamUrl(): string {
     return `${XiaoQApi.baseUrl()}/api/camera?token=${encodeURIComponent(XiaoQApi.token)}`
+  }
+
+  static photoPageUrl(): string {
+    return `${XiaoQApi.baseUrl()}/api/photos/latest?token=${encodeURIComponent(XiaoQApi.token)}`
   }
 
   static meetingUrl(filename: string): string {
@@ -118,6 +129,10 @@ export class XiaoQApi {
       JSON.stringify({ text: text, speak: speakOnDevice })
     )) as VisionResponse
     return result
+  }
+
+  static async photoStatus(): Promise<PhotoStatus> {
+    return JSON.parse(await XiaoQApi.request('/api/photos/status', http.RequestMethod.GET, '')) as PhotoStatus
   }
 
   static async gimbal(pan: number, tilt: number): Promise<void> {

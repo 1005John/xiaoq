@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 
@@ -34,6 +34,7 @@ MEETING_ARCHIVE = MEETING_ROOT / "archive"
 MEETING_OUTPUT = MEETING_ROOT / "output"
 MEETING_JOBS = MEETING_ROOT / "jobs"
 CHAT_ROOT = MOBILE_ROOT / "chat"
+PHOTO_ROOT = MOBILE_ROOT / "photos"
 ESP32_LED_STATE_PATH = DATA_ROOT / "esp32_led_state.json"
 REMOTE_DEVICES_STATE_PATH = DATA_ROOT / "remote_devices.json"
 TODOS_PATH = DATA_ROOT / "todos.json"
@@ -46,8 +47,9 @@ VISION_MODEL = "mimo-v2.5"
 VISION_CAPTURE_TIMEOUT = 10.0
 MAX_VISION_TEXT = 2000
 MAX_VISION_IMAGE_BYTES = 8 * 1024 * 1024
+SHARED_CAMERA_FRAME_PATH = Path("/dev/shm/xiaoq_camera_latest.jpg")
 
-for directory in (VOICE_ROOT, CHAT_ROOT, MEETING_INBOX, MEETING_ARCHIVE, MEETING_OUTPUT, MEETING_JOBS):
+for directory in (VOICE_ROOT, CHAT_ROOT, MEETING_INBOX, MEETING_ARCHIVE, MEETING_OUTPUT, MEETING_JOBS, PHOTO_ROOT):
     directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -448,9 +450,9 @@ class CameraStream:
             self.frame = None
             self.stop_event.clear()
             self.started = True
-        # Stop the Hailo pipeline before Picamera2 is opened for the phone.
-        send_command({"type": "camera_reserve"})
-        time.sleep(0.6)
+        # Prefer the frame exported by XiaoQ's existing Hailo pipeline. The
+        # fallback in _capture reserves Picamera2 only when that pipeline is
+        # unavailable, so live phone video and gesture detection can coexist.
         thread = threading.Thread(target=self._capture, daemon=True, name="mobile-camera")
         with self.lock:
             self.thread = thread
@@ -491,6 +493,36 @@ class CameraStream:
         try:
             import cv2
             from picamera2 import Picamera2
+
+            # HailoFace exports a throttled JPEG in shared memory. Serving it
+            # avoids opening a second Picamera2 while face/gesture inference is
+            # active.
+            shared_deadline = time.monotonic() + 2.0
+            while not self.stop_event.is_set() and time.monotonic() < shared_deadline:
+                try:
+                    if SHARED_CAMERA_FRAME_PATH.exists() and (
+                        time.time() - SHARED_CAMERA_FRAME_PATH.stat().st_mtime < 2.0
+                    ):
+                        while not self.stop_event.is_set():
+                            try:
+                                if time.time() - SHARED_CAMERA_FRAME_PATH.stat().st_mtime >= 2.0:
+                                    break
+                                frame = SHARED_CAMERA_FRAME_PATH.read_bytes()
+                                if frame:
+                                    with self.lock:
+                                        self.frame = frame
+                                time.sleep(1 / 15)
+                            except OSError:
+                                time.sleep(0.05)
+                        return
+                except OSError:
+                    pass
+                time.sleep(0.05)
+
+            # No shared Hailo frame: explicitly reserve the camera and use the
+            # existing phone-only capture path.
+            send_command({"type": "camera_reserve"})
+            time.sleep(0.6)
 
             camera = Picamera2()
             camera.configure(camera.create_preview_configuration(
@@ -876,6 +908,54 @@ def camera_page():
 @app.get("/api/camera/status")
 def camera_status():
     return jsonify({"ok": not bool(camera_stream.error), "error": camera_stream.error})
+
+
+@app.get("/api/photos/status")
+def photo_status():
+    """Return the latest gesture-triggered photo without opening the camera."""
+    latest = PHOTO_ROOT / "latest.json"
+    if not latest.exists():
+        return jsonify({"ok": True, "available": False, "filename": "", "captured_at": ""})
+    metadata = read_json(latest)
+    filename = secure_filename(str(metadata.get("filename", "")))
+    photo = PHOTO_ROOT / filename if filename else None
+    if not photo or not photo.exists():
+        return jsonify({"ok": True, "available": False, "filename": "", "captured_at": ""})
+    return jsonify({
+        "ok": True,
+        "available": True,
+        "filename": filename,
+        "captured_at": str(metadata.get("captured_at", "")),
+    })
+
+
+@app.get("/api/photos/latest")
+def latest_photo_page():
+    """Serve an authenticated page so Harmony Web can display the JPEG."""
+    latest = PHOTO_ROOT / "latest.json"
+    metadata = read_json(latest) if latest.exists() else {}
+    filename = secure_filename(str(metadata.get("filename", "")))
+    photo = PHOTO_ROOT / filename if filename else None
+    if not photo or not photo.exists():
+        return jsonify({"ok": False, "error": "no gesture photo"}), 404
+    token = html.escape(request.args.get("token", ""), quote=True)
+    image_url = f"/api/photos/file/{html.escape(filename, quote=True)}?token={token}"
+    captured_at = html.escape(str(metadata.get("captured_at", "")))
+    return Response(
+        f"""<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<style>html,body{{margin:0;background:#101722;height:100%;overflow:hidden}}img{{display:block;width:100%;height:100%;object-fit:contain}}</style>
+<img src=\"{image_url}\" alt=\"小Q手势拍照\" title=\"{captured_at}\">""",
+        mimetype="text/html",
+    )
+
+
+@app.get("/api/photos/file/<filename>")
+def latest_photo_file(filename: str):
+    safe_name = secure_filename(filename)
+    photo = PHOTO_ROOT / safe_name
+    if not safe_name or not photo.exists() or photo.parent != PHOTO_ROOT:
+        return jsonify({"ok": False, "error": "photo not found"}), 404
+    return send_file(photo, mimetype="image/jpeg", max_age=0, conditional=True)
 
 
 @app.errorhandler(413)

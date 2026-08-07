@@ -24,8 +24,9 @@ PC, TC = 90.0, 150.0
 class HailoFace:
     """与 BaiduFace 完全一致的接口, 内部使用 Hailo-8L SCRFD 2.5G"""
 
-    def __init__(self, gimbal_ctrl):
+    def __init__(self, gimbal_ctrl, frame_callback=None):
         self.gimbal = gimbal_ctrl
+        self.frame_callback = frame_callback
         self.running = False
         self.face_detected = False
         self.face_pan = PC
@@ -42,7 +43,7 @@ class HailoFace:
         self.running = True
 
         # 启动 Hailo 推理管线
-        self._pipeline = HailoFacePipeline(self._queue)
+        self._pipeline = HailoFacePipeline(self._queue, self._on_pipeline_frame)
         self._pipeline.start()
 
         # 启动追踪线程
@@ -50,6 +51,17 @@ class HailoFace:
             target=self._run_tracking, daemon=True, name="hailo-track"
         )
         self._track_thread.start()
+
+    def _on_pipeline_frame(self, frame, detections):
+        """Forward the existing camera frame to optional secondary inference."""
+        if self.frame_callback is None or not detections:
+            return
+        try:
+            best = max(detections, key=lambda item: item.confidence)
+            if best.confidence >= 0.3:
+                self.frame_callback(frame, best.bbox)
+        except Exception as exc:
+            print(f"[HailoFace] frame callback error: {exc}")
 
     def stop(self):
         self.running = False

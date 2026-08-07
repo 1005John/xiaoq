@@ -24,6 +24,7 @@ import wave, struct, subprocess as _subprocess
 import socket
 from gimbal_driver import GimbalController
 from hailo_face import HailoFace
+from hailo_gesture import HailoPhotoGesture
 from skills.data_collector import DataCollector
 from skills.name_corrector import correct
 import dashscope
@@ -5582,6 +5583,107 @@ _face_search_active = False
 _sleep_timer = 0
 _is_sleeping = False
 _mobile_camera_reserved = False
+_gesture_photo = None
+_photo_capture_lock = threading.Lock()
+_photo_capture_in_progress = False
+_photo_root = os.path.expanduser("~/xiaoq/data/mobile/photos")
+os.makedirs(_photo_root, exist_ok=True)
+_shared_camera_frame_path = "/dev/shm/xiaoq_camera_latest.jpg"
+_last_shared_frame_write = 0.0
+
+
+def _on_face_frame_for_gesture(frame, face_bbox):
+    global _last_shared_frame_write
+    if _gesture_photo is None:
+        return
+    _gesture_photo.submit_frame(frame, face_bbox)
+    # mobile_control.py can serve this frame without opening a second camera.
+    now = time.monotonic()
+    if now - _last_shared_frame_write >= 0.20:
+        try:
+            import cv2
+            ok, encoded = cv2.imencode(
+                ".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
+                [cv2.IMWRITE_JPEG_QUALITY, 78],
+            )
+            if ok:
+                temporary = _shared_camera_frame_path + ".tmp"
+                with open(temporary, "wb") as frame_file:
+                    frame_file.write(encoded.tobytes())
+                os.replace(temporary, _shared_camera_frame_path)
+                _last_shared_frame_write = now
+        except Exception as exc:
+            log.debug("shared camera frame unavailable: %s", exc)
+
+
+def _on_photo_gesture():
+    """Queue one spoken countdown and save the latest shared camera frame."""
+    global _photo_capture_in_progress
+    with _photo_capture_lock:
+        if _photo_capture_in_progress:
+            return
+        _photo_capture_in_progress = True
+
+    def _capture_worker():
+        global _photo_capture_in_progress
+        try:
+            print("[Gesture] 拍照手势确认，开始倒计时")
+            sm.trigger("surprised")
+            ws_server.command_queue.append({
+                "type": "voice_tts",
+                "text": "准备拍照，三、二、一。",
+            })
+            time.sleep(3.8)
+            frame = _gesture_photo.latest_frame() if _gesture_photo else None
+            if frame is None:
+                print("[Gesture] 倒计时后没有可用摄像头帧")
+                ws_server.command_queue.append({
+                    "type": "voice_tts",
+                    "text": "没有拿到照片，请再试一次。",
+                })
+                return
+            import cv2
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"gesture_{stamp}.jpg"
+            target = os.path.join(_photo_root, filename)
+            # Hailo frames are RGB; OpenCV writes BGR JPEG files.
+            if not cv2.imwrite(target, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
+                               [cv2.IMWRITE_JPEG_QUALITY, 92]):
+                raise RuntimeError("JPEG write failed")
+            latest_meta = {
+                "filename": filename,
+                "path": target,
+                "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "source": "hailo_open_palm",
+            }
+            temporary = os.path.join(_photo_root, "latest.json.tmp")
+            with open(temporary, "w", encoding="utf-8") as meta_file:
+                json.dump(latest_meta, meta_file, ensure_ascii=False)
+            os.replace(temporary, os.path.join(_photo_root, "latest.json"))
+            print(f"[Gesture] 照片已保存: {target}")
+            ws_server.command_queue.append({
+                "type": "card_show",
+                "title": "手势拍照完成",
+                "lines": ["照片已发送到手机 App", filename],
+                "card_type": "todo",
+                "no_auto_close": True,
+            })
+        except Exception as exc:
+            print(f"[Gesture] 拍照失败: {exc}")
+            ws_server.command_queue.append({
+                "type": "voice_tts",
+                "text": "拍照失败，请检查摄像头。",
+            })
+        finally:
+            with _photo_capture_lock:
+                _photo_capture_in_progress = False
+
+    threading.Thread(target=_capture_worker, daemon=True, name="gesture-photo").start()
+
+
+if os.environ.get("XIAOQ_GESTURE_ENABLED", "0").strip().lower() not in {"0", "false", "no", "off"}:
+    _gesture_photo = HailoPhotoGesture(on_trigger=_on_photo_gesture)
+    _gesture_photo.start()
 
 
 def _start_face_tracking():
@@ -5594,7 +5696,7 @@ def _start_face_tracking():
         if not Picamera2.global_camera_info():
             print("[Face] 无摄像头, 跳过人脸追踪")
             return
-        _face_search = HailoFace(gimbal_ctrl)
+        _face_search = HailoFace(gimbal_ctrl, frame_callback=_on_face_frame_for_gesture)
         _face_search.start()
         _face_search_active = True
         print("[Face] Hailo 人脸检测与云台追踪已启动")

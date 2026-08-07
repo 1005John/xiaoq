@@ -33,6 +33,9 @@ struct Index {
   // makes saving settings construct a fresh, authenticated camera request.
   @State cameraUrl: string = ''
   @State showCamera: boolean = false
+  @State photoUrl: string = ''
+  @State showPhoto: boolean = false
+  @State photoState: string = '等待手势拍照'
   @State meetingState: string = '准备录制会议'
   @State meetingRecording: boolean = false
   @State meetingPaused: boolean = false
@@ -40,17 +43,72 @@ struct Index {
   @State meetingFile: string = ''
   @State meetingActions: MeetingActionItem[] = []
   private cameraController: webview.WebviewController = new webview.WebviewController()
+  private photoController: webview.WebviewController = new webview.WebviewController()
   private cameraRefreshId: number = 0
+  private photoRefreshId: number = 0
+  private photoPollTimer: number = -1
   private meetingRecorder: Recorder = new Recorder()
 
   aboutToAppear(): void {
     this.loadSavedConnection()
     this.refreshCameraStream()
+    this.startPhotoPolling()
+    this.refreshLatestPhoto()
     this.syncGimbalMode()
+  }
+
+  aboutToDisappear(): void {
+    if (this.photoPollTimer >= 0) {
+      clearInterval(this.photoPollTimer)
+      this.photoPollTimer = -1
+    }
   }
 
   onPageShow(): void {
     this.refreshCameraStream()
+    this.startPhotoPolling()
+    this.refreshLatestPhoto()
+  }
+
+  private startPhotoPolling(): void {
+    if (this.photoPollTimer >= 0) {
+      return
+    }
+    this.photoPollTimer = setInterval((): void => {
+      if (this.tab === 1) {
+        this.refreshLatestPhoto()
+      }
+    }, 3000)
+  }
+
+  private async refreshLatestPhoto(): Promise<void> {
+    if (this.token.trim().length === 0) {
+      return
+    }
+    this.applyConnection()
+    try {
+      const status = await XiaoQApi.photoStatus()
+      if (!status.available) {
+        this.photoState = '等待手势拍照'
+        return
+      }
+      this.photoState = `最新照片：${status.captured_at}`
+      const source = `${XiaoQApi.photoPageUrl()}&refresh=${encodeURIComponent(status.captured_at)}`
+      if (source === this.photoUrl) {
+        return
+      }
+      const refreshId = ++this.photoRefreshId
+      this.showPhoto = false
+      setTimeout((): void => {
+        if (refreshId !== this.photoRefreshId) {
+          return
+        }
+        this.photoUrl = source
+        this.showPhoto = true
+      }, 80)
+    } catch (_) {
+      this.photoState = '暂时无法获取拍照结果'
+    }
   }
 
   private connectionStore(): preferences.Preferences {
@@ -200,6 +258,7 @@ struct Index {
           this.tab = index
           if (index === 1) {
             this.refreshCameraStream()
+            this.refreshLatestPhoto()
             this.syncGimbalMode()
           }
           if (index === 2) {
@@ -262,6 +321,12 @@ struct Index {
           .fontSize(15).fontColor('#8290A4').backgroundColor('#000000')
       }
       Button('刷新画面').width('100%').onClick((): void => { this.refreshCameraStream() })
+      Text(this.photoState).fontSize(14).fontColor('#C8D2E3')
+      if (this.showPhoto && this.photoUrl.length > 0) {
+        Text('手势拍照').fontSize(14).fontColor('#8290A4')
+        Web({ src: this.photoUrl, controller: this.photoController })
+          .width('100%').height(250).backgroundColor('#000000')
+      }
       Text(this.remoteState).fontSize(14).fontColor('#C8D2E3')
       Text(`左右 ${this.pan}°`).fontSize(16).fontColor('#F4F7FB')
       Slider({ value: this.pan, min: 75, max: 105, step: 1 })
