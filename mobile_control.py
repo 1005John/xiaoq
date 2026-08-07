@@ -441,6 +441,10 @@ class CameraStream:
         self.started = False
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
+        # More than one WebView request can briefly subscribe to the MJPEG
+        # endpoint while HarmonyOS reloads a page. Keep the producer alive
+        # until the last subscriber disconnects.
+        self.clients = 0
 
     def ensure_started(self) -> None:
         with self.lock:
@@ -465,6 +469,7 @@ class CameraStream:
             if not self.started and thread is None:
                 return
             self.stop_event.set()
+            self.clients = 0
         if thread and thread is not threading.current_thread():
             thread.join(timeout=3.0)
         with self.lock:
@@ -551,6 +556,8 @@ class CameraStream:
 
     def generate(self):
         self.ensure_started()
+        with self.lock:
+            self.clients += 1
         try:
             while True:
                 with self.lock:
@@ -562,7 +569,11 @@ class CameraStream:
                     yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 time.sleep(1 / 15)
         finally:
-            self.stop()
+            with self.lock:
+                self.clients = max(0, self.clients - 1)
+                last_client = self.clients == 0
+            if last_client:
+                self.stop()
 
 
 camera_stream = CameraStream()
