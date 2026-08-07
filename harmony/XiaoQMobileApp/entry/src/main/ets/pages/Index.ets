@@ -322,12 +322,6 @@ struct Index {
             .fontSize(15).fontColor('#8290A4').backgroundColor('#000000')
         }
         Button('刷新画面').width('100%').onClick((): void => { this.refreshCameraStream() })
-        Text(this.photoState).fontSize(14).fontColor('#C8D2E3')
-        if (this.showPhoto && this.photoUrl.length > 0) {
-          Text('手势拍照').fontSize(14).fontColor('#8290A4')
-          Web({ src: this.photoUrl, controller: this.photoController })
-            .width('100%').height(250).backgroundColor('#000000')
-        }
         Text(this.remoteState).fontSize(14).fontColor('#C8D2E3')
         Text(`左右 ${this.pan}°`).fontSize(16).fontColor('#F4F7FB')
         Slider({ value: this.pan, min: 75, max: 105, step: 1 })
@@ -341,6 +335,12 @@ struct Index {
           .width('100%').onClick((): void => { this.toggleGimbalMode() })
         Text(this.manualMode ? '手动模式下可通过滑杆控制云台。' : '自动模式下由小Q表情控制云台。')
           .fontSize(13).fontColor('#8290A4')
+        Text(this.photoState).fontSize(14).fontColor('#C8D2E3')
+        if (this.showPhoto && this.photoUrl.length > 0) {
+          Text('手势拍照').fontSize(14).fontColor('#8290A4')
+          Web({ src: this.photoUrl, controller: this.photoController })
+            .width('100%').height(250).backgroundColor('#000000')
+        }
       }.padding(20).alignItems(HorizontalAlign.Start).width('100%')
     }.width('100%').height('100%')
   }
