@@ -4317,6 +4317,57 @@ class VoiceManager:
 
         reply = None
 
+        # N6705B status is a hardware query.  Keep it on the fixed, read-only
+        # path rather than letting a general-purpose agent probe USB drivers.
+        if "n6705" in txt.lower():
+            _n6705b_write_words = ("设置", "设为", "调到", "修改", "更改", "开启", "关闭", "打开", "输出")
+            if any(word in txt for word in _n6705b_write_words):
+                reply = (
+                    "N6705B 参数尚未修改。请明确给出通道、电压、电流限制，以及是否开启输出，"
+                    "例如：将 N6705B 通道1设为3.3伏、电流限制0.1安，开启输出。"
+                )
+            else:
+                try:
+                    import subprocess as _n6705b_subprocess
+
+                    _n6705b_python = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/python")
+                    _n6705b_script = os.path.expanduser("~/xiaoq/deploy/n6705b_read_status.py")
+                    _n6705b_result = _n6705b_subprocess.run(
+                        [_n6705b_python, _n6705b_script],
+                        capture_output=True,
+                        text=True,
+                        timeout=12,
+                    )
+                    _n6705b_data = _json.loads(_n6705b_result.stdout)
+                    if _n6705b_result.returncode == 0:
+                        reply = (
+                            "N6705B 状态：\n"
+                            f"型号：{_n6705b_data['identity']}\n"
+                            f"通信状态：{_n6705b_data['error']}\n"
+                            "未修改任何通道的电压、电流限制或输出开关。"
+                        )
+                    else:
+                        reply = f"N6705B 状态查询失败：{_n6705b_data.get('error', '未知错误')}"
+                except Exception as _n6705b_error:
+                    reply = f"N6705B 状态查询失败：{_n6705b_error}"
+
+            self.reply_text = reply
+            self._write_mobile_reply(reply_path, "completed", reply)
+            if ws_server:
+                ws_server.command_queue.append({
+                    "type": "card_show",
+                    "title": "N6705B 状态",
+                    "lines": [line for line in reply.split("\n") if line],
+                    "card_type": "todo",
+                })
+            if speak:
+                self.state = "speaking"
+                self.tts(reply, on_start=lambda: setattr(self, "state", "speaking"),
+                         on_end=lambda: setattr(self, "state", "idle"))
+            else:
+                self.state = "idle"
+            return
+
         # ── 方式1: HTTP API Server (常驻，无冷启动) ──
         try:
             # 会议纪要需要本地文件任务和异步产物，跳过普通聊天接口，走下方技能分支。
