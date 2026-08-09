@@ -233,6 +233,16 @@ struct Index {
     }
   }
 
+  private async togglePersona(): Promise<void> {
+    this.applyConnection()
+    try {
+      await XiaoQApi.togglePersona()
+      this.talkState = '已切换表情风格、人格和音色（与 F2 相同）'
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
   private async moveGimbal(): Promise<void> {
     if (!this.manualMode) {
       return
@@ -330,6 +340,7 @@ struct Index {
             this.stopPtt()
           }
         })
+      Button('切换表情风格（F2）').width('100%').onClick((): void => { this.togglePersona() })
       Row() {
         Toggle({ type: ToggleType.Switch, isOn: this.speakOnDevice })
           .onChange((isOn: boolean): void => {

@@ -664,6 +664,14 @@ def ptt_stop():
     return jsonify({"ok": True, "active": False})
 
 
+@app.post("/api/persona/toggle")
+def persona_toggle():
+    """Switch the complete persona, matching the desktop F2 shortcut."""
+    if not send_command({"type": "persona_toggle"}):
+        return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+    return jsonify({"ok": True, "accepted": True})
+
+
 @app.post("/api/vision")
 def vision_chat():
     """Capture one frame, ask MiMo-V2.5, and optionally play it on XiaoQ."""

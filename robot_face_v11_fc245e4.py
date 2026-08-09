@@ -5269,6 +5269,9 @@ class WSServer:
                 if not _is_sleeping and not mobile_gimbal_is_manual():
                     _start_face_tracking()
                 print("[Camera] 手机视觉已释放摄像头")
+            elif cmd_type == "persona_toggle":
+                _toggle_persona()
+                print("[Persona] 手机请求切换完成")
 
             # ── 语音指令 ──
             elif cmd_type == "voice_start":
@@ -5546,6 +5549,28 @@ personality = _get_active_persona()["npc_factory"]()
 npc_sm = NPCStateMachine(sm, personality)
 npc_enabled = True
 sm.auto_mode = False
+
+
+def _toggle_persona():
+    """Apply the same complete persona switch for F2 and remote controls."""
+    global active_persona_idx, face_style, sm
+    active_persona_idx = (active_persona_idx + 1) % len(PERSONA_PROFILES)
+    persona = _get_active_persona()
+    face_style = persona["face_style"]
+    if face_style == "cute":
+        sm = sm_cute
+        print(f"[Persona] 切换: {persona['name']} | 表情: cute")
+    else:
+        sm = StateMachine()
+        print(f"[Persona] 切换: {persona['name']} | 表情: neon")
+    if npc_sm:
+        npc_sm.sm = sm
+        npc_sm.personality = persona["npc_factory"]()
+        npc_sm.idle_time = 0
+    sm.gimbal = gimbal_ctrl if gimbal_ctrl else None
+    sm.trigger(persona.get("switch_expression", "happy"))
+    _get_active_ambient().set_mood("excited" if face_style == "neon" else "love")
+    print(f"[Persona] 语言/音色已切换: {persona['name']} / {persona['voice']}")
 
 # 鼠标控制
 pygame.mouse.set_visible(False)
@@ -5846,23 +5871,7 @@ while running:
                 show_hud = not show_hud
             elif event.key == pygame.K_F2:
                 # F2: 原子切换完整人格（语言风格、表情、NPC行为、TTS音色）
-                active_persona_idx = (active_persona_idx + 1) % len(PERSONA_PROFILES)
-                _persona = _get_active_persona()
-                face_style = _persona["face_style"]
-                if face_style == 'cute':
-                    sm = sm_cute
-                    print(f"[Persona] 切换: {_persona['name']} | 表情: cute")
-                else:
-                    sm = StateMachine()
-                    print(f"[Persona] 切换: {_persona['name']} | 表情: neon")
-                if npc_sm:
-                    npc_sm.sm = sm
-                    npc_sm.personality = _persona["npc_factory"]()
-                    npc_sm.idle_time = 0
-                sm.gimbal = gimbal_ctrl if gimbal_ctrl else None
-                sm.trigger(_persona.get("switch_expression", "happy"))
-                _get_active_ambient().set_mood("excited" if face_style == "neon" else "love")
-                print(f"[Persona] 语言/音色已切换: {_persona['name']} / {_persona['voice']}")
+                _toggle_persona()
             elif event.key == pygame.K_F12:
                 # v10: F12截图
                 ts = __import__('time').strftime('%H%M%S')
