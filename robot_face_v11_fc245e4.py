@@ -4320,12 +4320,62 @@ class VoiceManager:
         # N6705B status is a hardware query.  Keep it on the fixed, read-only
         # path rather than letting a general-purpose agent probe USB drivers.
         if "n6705" in txt.lower():
-            _n6705b_write_words = ("设置", "设为", "调到", "修改", "更改", "开启", "关闭", "打开", "输出")
-            if any(word in txt for word in _n6705b_write_words):
-                reply = (
-                    "N6705B 参数尚未修改。请明确给出通道、电压、电流限制，以及是否开启输出，"
-                    "例如：将 N6705B 通道1设为3.3伏、电流限制0.1安，开启输出。"
-                )
+            _n6705b_action_words = ("设置", "设为", "调到", "修改", "更改", "开启输出", "关闭输出", "打开输出")
+            if any(word in txt for word in _n6705b_action_words):
+                _channel = re.search(r"(?:通道|channel)\s*([1-4])", txt, re.IGNORECASE)
+                _voltage = re.search(r"(\d+(?:\.\d+)?)\s*(?:伏特?|v(?:olt)?s?)", txt, re.IGNORECASE)
+                _current = re.search(r"(\d+(?:\.\d+)?)\s*(?:安培?|a(?:mp)?s?)", txt, re.IGNORECASE)
+                if any(word in txt for word in ("关闭输出", "输出关闭", "关掉输出")):
+                    _output = "off"
+                elif any(word in txt for word in ("开启输出", "打开输出", "输出开启")):
+                    _output = "on"
+                else:
+                    _output = None
+
+                if not all((_channel, _voltage, _current, _output)):
+                    reply = (
+                        "N6705B 参数尚未修改。请明确给出通道、电压、电流限制，以及是否开启输出，"
+                        "例如：将 N6705B 通道1设为3.3伏、电流限制0.1安，开启输出。"
+                    )
+                else:
+                    try:
+                        import subprocess as _n6705b_subprocess
+
+                        _n6705b_python = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/python")
+                        _n6705b_script = os.path.expanduser(
+                            "~/.hermes/skills/n6705b-power-supply/scripts/configure_n6705b.py"
+                        )
+                        _n6705b_result = _n6705b_subprocess.run(
+                            [
+                                _n6705b_python,
+                                _n6705b_script,
+                                "--resource", "USB0::0x0957::0x0F07::MY53003524::0::INSTR",
+                                "--channel", _channel.group(1),
+                                "--voltage", _voltage.group(1),
+                                "--current-limit", _current.group(1),
+                                "--output", _output,
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=20,
+                        )
+                        if _n6705b_result.returncode != 0:
+                            raise RuntimeError(_n6705b_result.stderr.strip() or "配置脚本执行失败")
+                        _n6705b_data = _json.loads(_n6705b_result.stdout)
+                        _n6705b_state = "开启" if _n6705b_data["output"] else "关闭"
+                        reply = (
+                            f"N6705B 通道{_n6705b_data['channel']}已验证：\n"
+                            f"电压设定：{_n6705b_data['voltage_set']} V\n"
+                            f"电流限制：{_n6705b_data['current_limit_set']} A\n"
+                            f"输出：{_n6705b_state}"
+                        )
+                        if _n6705b_data.get("output"):
+                            reply += (
+                                f"\n实测电压：{_n6705b_data.get('voltage_measured')} V"
+                                f"\n实测电流：{_n6705b_data.get('current_measured')} A"
+                            )
+                    except Exception as _n6705b_error:
+                        reply = f"N6705B 配置失败：{_n6705b_error}"
             else:
                 try:
                     import subprocess as _n6705b_subprocess
