@@ -23,6 +23,7 @@ struct Index {
   @State chatText: string = ''
   @State talkState: string = '输入文字后发送给小Q'
   @State chatReply: string = ''
+  @State pttActive: boolean = false
   @State speakOnDevice: boolean = false
   @State attachCamera: boolean = false
   @State pan: number = 90
@@ -48,6 +49,7 @@ struct Index {
   private photoRefreshId: number = 0
   private photoPollTimer: number = -1
   private meetingRecorder: Recorder = new Recorder()
+  private pttPressed: boolean = false
 
   aboutToAppear(): void {
     this.loadSavedConnection()
@@ -197,6 +199,40 @@ struct Index {
     }
   }
 
+  private async startPtt(): Promise<void> {
+    if (this.pttPressed) {
+      return
+    }
+    this.pttPressed = true
+    this.pttActive = true
+    this.talkState = '正在通过小Q麦克风录音...'
+    this.applyConnection()
+    try {
+      await XiaoQApi.pttStart()
+    } catch (error) {
+      this.pttPressed = false
+      this.pttActive = false
+      this.talkState = '无法启动小Q录音'
+      this.message((error as Error).message)
+    }
+  }
+
+  private async stopPtt(): Promise<void> {
+    if (!this.pttPressed) {
+      return
+    }
+    this.pttPressed = false
+    this.pttActive = false
+    this.talkState = '小Q正在识别语音并回复...'
+    this.applyConnection()
+    try {
+      await XiaoQApi.pttStop()
+    } catch (error) {
+      this.talkState = '无法停止小Q录音'
+      this.message((error as Error).message)
+    }
+  }
+
   private async moveGimbal(): Promise<void> {
     if (!this.manualMode) {
       return
@@ -284,6 +320,16 @@ struct Index {
         .height(120).fontSize(17).backgroundColor('#1B2635').fontColor('#F4F7FB')
         .placeholderColor('#8290A4').onChange((value: string): void => { this.chatText = value })
       Button('发送文字').width('100%').onClick((): void => { this.sendText() })
+      Button(this.pttActive ? '松开后发送语音' : '按住说话')
+        .width('100%').height(56).fontSize(18)
+        .backgroundColor(this.pttActive ? '#D8555F' : '#2E85FF')
+        .onTouch((event: TouchEvent): void => {
+          if (event.type === TouchType.Down) {
+            this.startPtt()
+          } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+            this.stopPtt()
+          }
+        })
       Row() {
         Toggle({ type: ToggleType.Switch, isOn: this.speakOnDevice })
           .onChange((isOn: boolean): void => {

@@ -66,6 +66,8 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 gimbal_lock = threading.Lock()
 gimbal_state = {"mode": "auto", "pan": 90, "tilt": 150}
 todo_lock = threading.Lock()
+ptt_lock = threading.Lock()
+ptt_active = False
 
 
 def iso_now() -> str:
@@ -634,6 +636,32 @@ def chat():
         time.sleep(0.2)
     job_path.unlink(missing_ok=True)
     return jsonify({"ok": False, "error": "小Q回复超时"}), 504
+
+
+@app.post("/api/ptt/start")
+def ptt_start():
+    """Start XiaoQ's local microphone, matching a Space key-down event."""
+    global ptt_active
+    with ptt_lock:
+        if ptt_active:
+            return jsonify({"ok": True, "active": True, "already_active": True})
+        if not send_command({"type": "voice_start"}):
+            return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+        ptt_active = True
+    return jsonify({"ok": True, "active": True})
+
+
+@app.post("/api/ptt/stop")
+def ptt_stop():
+    """Stop XiaoQ's local microphone, matching a Space key-up event."""
+    global ptt_active
+    with ptt_lock:
+        if not ptt_active:
+            return jsonify({"ok": True, "active": False, "already_stopped": True})
+        ptt_active = False
+        if not send_command({"type": "voice_stop"}):
+            return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+    return jsonify({"ok": True, "active": False})
 
 
 @app.post("/api/vision")

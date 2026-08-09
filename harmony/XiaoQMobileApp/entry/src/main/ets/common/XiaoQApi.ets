@@ -131,6 +131,14 @@ export class XiaoQApi {
     return result
   }
 
+  static async pttStart(): Promise<void> {
+    await XiaoQApi.request('/api/ptt/start', http.RequestMethod.POST, '{}')
+  }
+
+  static async pttStop(): Promise<void> {
+    await XiaoQApi.request('/api/ptt/stop', http.RequestMethod.POST, '{}')
+  }
+
   static async photoStatus(): Promise<PhotoStatus> {
     return JSON.parse(await XiaoQApi.request('/api/photos/status', http.RequestMethod.GET, '')) as PhotoStatus
   }
