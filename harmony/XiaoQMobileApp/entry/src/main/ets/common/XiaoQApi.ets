@@ -143,6 +143,10 @@ export class XiaoQApi {
     await XiaoQApi.request('/api/persona/toggle', http.RequestMethod.POST, '{}')
   }
 
+  static async setTtsVolume(percent: number): Promise<void> {
+    await XiaoQApi.request('/api/tts/volume', http.RequestMethod.POST, JSON.stringify({ percent: percent }))
+  }
+
   static async photoStatus(): Promise<PhotoStatus> {
     return JSON.parse(await XiaoQApi.request('/api/photos/status', http.RequestMethod.GET, '')) as PhotoStatus
   }

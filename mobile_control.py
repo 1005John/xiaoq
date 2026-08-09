@@ -672,6 +672,19 @@ def persona_toggle():
     return jsonify({"ok": True, "accepted": True})
 
 
+@app.post("/api/tts/volume")
+def tts_volume():
+    """Set XiaoQ speaker volume immediately while TTS may be playing."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        percent = max(0, min(100, int(payload["percent"])))
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"ok": False, "error": "percent must be an integer from 0 to 100"}), 400
+    if not send_command({"type": "volume_set", "percent": percent}):
+        return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+    return jsonify({"ok": True, "percent": percent})
+
+
 @app.post("/api/vision")
 def vision_chat():
     """Capture one frame, ask MiMo-V2.5, and optionally play it on XiaoQ."""

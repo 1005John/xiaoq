@@ -4904,12 +4904,7 @@ __REPORT_CONTENT__</body></html>"""
                                     else:
                                         _pct = 50
                             if _pct is not None:
-                                _pct = max(0, min(100, _pct))
-                                _val = int(_pct * 127 / 100)
-                                _sp.run(["amixer","-c","2","sset","PCM",str(_val)], capture_output=True, timeout=5)
-                                _sp.run(["amixer","-c","2","sset","HP",str(max(1,min(9,int(_pct*9/100))))], capture_output=True, timeout=5)
-                                _sp.run(["amixer","-c","2","sset","Line",str(max(1,min(9,int(_pct*9/100))))], capture_output=True, timeout=5)
-                                _sp.run(["sudo","alsactl","store"], capture_output=True, timeout=5)
+                                _pct = _set_tts_volume(_pct)
                                 _skill_result = f"音量已设置为 {_pct}%"
                             else:
                                 _cr = _sp.run(["amixer","-c","2","sget","PCM"], capture_output=True, text=True, timeout=5)
@@ -5124,6 +5119,27 @@ __REPORT_CONTENT__</body></html>"""
         self._stop_tts_playback()
 
 
+def _set_tts_volume(percent):
+    """Apply speaker gain immediately; aplay reads this mixer during playback."""
+    pct = max(0, min(100, int(percent)))
+    pcm = int(pct * 127 / 100)
+    amp = max(1, min(9, int(pct * 9 / 100)))
+    for control, value in (("PCM", pcm), ("HP", amp), ("Line", amp)):
+        result = _subprocess.run(
+            ["amixer", "-c", "2", "sset", control, str(value)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"unable to set {control}")
+    # Persist when the service account is allowed to do so; volume changes must
+    # still take effect even if alsactl persistence is not configured.
+    _subprocess.run(["sudo", "-n", "alsactl", "store"], capture_output=True, timeout=5)
+    print(f"[Volume] TTS output set to {pct}%")
+    return pct
+
+
 # ── WebSocket 服务端 ──
 class WSServer:
     def __init__(self):
@@ -5272,6 +5288,11 @@ class WSServer:
             elif cmd_type == "persona_toggle":
                 _toggle_persona()
                 print("[Persona] 手机请求切换完成")
+            elif cmd_type == "volume_set":
+                try:
+                    _set_tts_volume(cmd.get("percent", 60))
+                except (TypeError, ValueError, RuntimeError, _subprocess.SubprocessError) as exc:
+                    print(f"[Volume] 手机设置失败: {exc}")
 
             # ── 语音指令 ──
             elif cmd_type == "voice_start":

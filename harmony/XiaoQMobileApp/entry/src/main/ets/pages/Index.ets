@@ -24,6 +24,7 @@ struct Index {
   @State talkState: string = '输入文字后发送给小Q'
   @State chatReply: string = ''
   @State pttActive: boolean = false
+  @State ttsVolume: number = 60
   @State speakOnDevice: boolean = false
   @State attachCamera: boolean = false
   @State pan: number = 90
@@ -243,6 +244,17 @@ struct Index {
     }
   }
 
+  private async setTtsVolume(value: number): Promise<void> {
+    const percent = Math.max(0, Math.min(100, Math.round(value)))
+    this.ttsVolume = percent
+    this.applyConnection()
+    try {
+      await XiaoQApi.setTtsVolume(percent)
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
   private async moveGimbal(): Promise<void> {
     if (!this.manualMode) {
       return
@@ -341,6 +353,9 @@ struct Index {
           }
         })
       Button('切换表情风格（F2）').width('100%').onClick((): void => { this.togglePersona() })
+      Text(`TTS 播报音量 ${this.ttsVolume}%`).fontSize(14).fontColor('#C8D2E3').width('100%')
+      Slider({ value: this.ttsVolume, min: 0, max: 100, step: 5 })
+        .onChange((value: number): void => { this.setTtsVolume(value) })
       Row() {
         Toggle({ type: ToggleType.Switch, isOn: this.speakOnDevice })
           .onChange((isOn: boolean): void => {
