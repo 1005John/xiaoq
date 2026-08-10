@@ -14,7 +14,6 @@ import re
 import sys
 import asyncio
 import threading
-import queue
 import json
 import time
 import enum
@@ -3813,6 +3812,7 @@ class VoiceManager:
         _model = "mimo-v2.5-tts"
         _sys_prompt = _get_active_persona().get("tts_prompt", "用自然亲切的中文女声播报")
         print(f"[TTS] {_model} ({voice}): {text[:40]}...")
+        if on_start: on_start()
         if self.proc:
             self.proc.terminate()
             try: self.proc.wait(timeout=2)
@@ -3872,8 +3872,6 @@ class VoiceManager:
                                 if not _first_audio:
                                     _first_audio = True
                                     print("[TTS] First audio chunk sent to speaker")
-                                    if on_start:
-                                        on_start()
                     except: pass
 
             if _play_proc.stdin:
@@ -4318,8 +4316,6 @@ class VoiceManager:
         import json as _json, urllib.request as _ur
 
         reply = None
-        _speech_queue = None
-        _speech_thread = None
 
         # N6705B status is a hardware query.  Keep it on the fixed, read-only
         # path rather than letting a general-purpose agent probe USB drivers.
@@ -4512,72 +4508,10 @@ class VoiceManager:
                 _user_msg = f"数据：\n{_skill_data}\n\n用户问：{txt}\n\n请根据数据回答"
             else:
                 _user_msg = txt
-
-            # Only stream ordinary chat. Skill replies may end with a hidden
-            # action object, which must be executed before it is spoken.
-            _stream_speech = speak and _intent1 == "chat"
-            _speech_buffer = ""
-            _speech_audio_started = False
-            _stream_started_at = time.monotonic()
-
-            def _queue_speech_segments(final=False):
-                """Split model deltas into natural, short TTS units."""
-                nonlocal _speech_buffer
-                while _speech_buffer:
-                    _punctuation = next(
-                        (index + 1 for index, char in enumerate(_speech_buffer)
-                         if char in "，。！？；、\\n!?;,"),
-                        None,
-                    )
-                    if _punctuation is not None:
-                        _segment = _speech_buffer[:_punctuation].strip()
-                        _speech_buffer = _speech_buffer[_punctuation:]
-                    elif len(_speech_buffer) >= 24:
-                        _segment = _speech_buffer[:24].strip()
-                        _speech_buffer = _speech_buffer[24:]
-                    elif final:
-                        _segment = _speech_buffer.strip()
-                        _speech_buffer = ""
-                    else:
-                        return
-                    if _segment and _speech_queue:
-                        _speech_queue.put(_segment)
-
-            def _speak_queued_segments():
-                nonlocal _speech_audio_started
-                while True:
-                    _segment = _speech_queue.get()
-                    if _segment is None:
-                        break
-
-                    def _on_first_audio():
-                        nonlocal _speech_audio_started
-                        if not _speech_audio_started:
-                            _speech_audio_started = True
-                            print(
-                                "[HERMES-STREAM] first speaker audio after "
-                                f"{time.monotonic() - _stream_started_at:.2f}s"
-                            )
-
-                    self.tts(
-                        _segment,
-                        on_start=lambda: (setattr(self, "state", "speaking"), _on_first_audio()),
-                    )
-
-            if _stream_speech:
-                _speech_queue = queue.Queue()
-                _speech_thread = threading.Thread(
-                    target=_speak_queued_segments,
-                    name="xiaoq-stream-tts",
-                    daemon=True,
-                )
-                _speech_thread.start()
-
             _body = _json.dumps({
                 "model": "mimo-v2.5-pro",
                 "messages": [{"role": "system", "content": _sys1}, {"role": "user", "content": _user_msg}],
                 "max_tokens": 500,
-                "stream": _stream_speech,
             }, ensure_ascii=False).encode("utf-8")
             _req = _ur.Request(
                 "http://127.0.0.1:8086/v1/chat/completions",
@@ -4588,47 +4522,11 @@ class VoiceManager:
                 },
             )
             with _ur.urlopen(_req, timeout=90) as _resp:
-                if _stream_speech:
-                    _parts = []
-                    _first_delta_at = None
-                    for _line in _resp:
-                        _line = _line.decode("utf-8", errors="replace").strip()
-                        if not _line.startswith("data: "):
-                            continue
-                        _data_str = _line[6:]
-                        if _data_str == "[DONE]":
-                            break
-                        try:
-                            _chunk = _json.loads(_data_str)
-                            _delta = _chunk.get("choices", [{}])[0].get("delta", {})
-                            _content = _delta.get("content")
-                            if _content:
-                                if _first_delta_at is None:
-                                    _first_delta_at = time.monotonic()
-                                    print(
-                                        "[HERMES-STREAM] first text delta after "
-                                        f"{_first_delta_at - _stream_started_at:.2f}s"
-                                    )
-                                _parts.append(_content)
-                                _speech_buffer += _content
-                                _queue_speech_segments()
-                        except (TypeError, ValueError, KeyError):
-                            continue
-                    _queue_speech_segments(final=True)
-                    _speech_queue.put(None)
-                    reply = "".join(_parts).strip()
-                    print(f"[HERMES-STREAM] reply: {reply[:50]}")
-                else:
-                    _data = _json.loads(_resp.read().decode("utf-8"))
-                    reply = _data["choices"][0]["message"]["content"].strip()
-                    _tokens = _data.get("usage", {}).get("total_tokens", "?")
-                    print(f"[HERMES-API] {_tokens} tokens, reply: {reply[:50]}")
+                _data = _json.loads(_resp.read().decode("utf-8"))
+                reply = _data["choices"][0]["message"]["content"].strip()
+                _tokens = _data.get("usage", {}).get("total_tokens", "?")
+                print(f"[HERMES-API] {_tokens} tokens, reply: {reply[:50]}")
         except Exception as e:
-            if _speech_queue:
-                _speech_queue.put(None)
-            if _speech_thread:
-                _speech_thread.join(timeout=2)
-                _speech_thread = None
             print(f"[HERMES-API] failed: {e}, falling back to subprocess")
 
         # ── 方式2: 直连 LLM (无冷启动) ──
@@ -5306,17 +5204,10 @@ __REPORT_CONTENT__</body></html>"""
                 voice_text = _clean
         
         if speak:
-            if _speech_thread:
-                # The regular-chat stream is already being spoken sentence by
-                # sentence. Wait for its final queued segment instead of
-                # replaying the completed reply as one large TTS request.
-                _speech_thread.join(timeout=120)
-                self.state = "idle"
-            else:
-                self.state = "speaking"
-                self.tts(voice_text,
-                        on_start=lambda: setattr(self, 'state', 'speaking'),
-                        on_end=lambda: setattr(self, 'state', 'idle'))
+            self.state = "speaking"
+            self.tts(voice_text,
+                    on_start=lambda: setattr(self, 'state', 'speaking'),
+                    on_end=lambda: setattr(self, 'state', 'idle'))
         else:
             self.state = "idle"
 
