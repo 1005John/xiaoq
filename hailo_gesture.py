@@ -18,6 +18,9 @@ from pathlib import Path
 class HailoPhotoGesture:
     """Detect a stable open-palm gesture from frames supplied by HailoFace."""
 
+    PRESENCE_THRESHOLD = 0.80
+    HOLD_SECONDS = 1.5
+
     def __init__(self, on_trigger=None, hef_path=""):
         self.on_trigger = on_trigger
         self.hef_path = hef_path or os.environ.get(
@@ -135,7 +138,7 @@ class HailoPhotoGesture:
                                 result = infer.infer({input_name: resized[None, ...].astype(np.uint8)})
                                 points, presence = self._decode_result(result, np)
                                 best_presence = max(best_presence, presence)
-                                if presence >= 0.65 and self._is_open_palm(points, np):
+                                if presence >= self.PRESENCE_THRESHOLD and self._is_open_palm(points, np):
                                     observed = True
                                     break
                             self.last_presence = best_presence
@@ -194,8 +197,8 @@ class HailoPhotoGesture:
         if not np.isfinite(xy).all():
             return False
         # MediaPipe landmark indices: wrist 0, finger PIPs 6/10/14/18,
-        # finger tips 8/12/16/20.  Three of four extended fingers is enough
-        # to tolerate a slightly occluded thumb or a tilted palm.
+        # finger tips 8/12/16/20.  Requiring all four long fingers avoids
+        # treating a partial hand, face contour, or casual movement as a palm.
         wrist = xy[0]
         pip_indices = (6, 10, 14, 18)
         tip_indices = (8, 12, 16, 20)
@@ -203,7 +206,7 @@ class HailoPhotoGesture:
         for pip_idx, tip_idx in zip(pip_indices, tip_indices):
             if np.linalg.norm(xy[tip_idx] - wrist) > np.linalg.norm(xy[pip_idx] - wrist) * 1.08:
                 extended += 1
-        return extended >= 3
+        return extended == 4
 
     def _update_stability(self, observed):
         now = time.monotonic()
@@ -211,7 +214,7 @@ class HailoPhotoGesture:
         if observed:
             if self._positive_since is None:
                 self._positive_since = now
-            if now - self._positive_since >= 0.8 and now >= self._cooldown_until:
+            if now - self._positive_since >= self.HOLD_SECONDS and now >= self._cooldown_until:
                 self._cooldown_until = now + 10.0
                 self._positive_since = None
                 print("[Gesture] open palm confirmed")
