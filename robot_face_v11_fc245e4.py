@@ -3498,37 +3498,6 @@ INTENT_SKILL_MAP_SEMANTIC = {
     },
 }
 
-# ── 语义匹配器 ──
-_SEMANTIC_MATCHER = None
-
-def _get_semantic_matcher():
-    global _SEMANTIC_MATCHER
-    if _SEMANTIC_MATCHER is not None:
-        return _SEMANTIC_MATCHER
-    try:
-        from skills.semantic_matcher import SemanticMatcher
-        # 从配置加载 API Key
-        import json
-        config_path = os.path.expanduser("~/.hermes/hermes-desktop-assistant/config.json")
-        api_key = ""
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                api_key = json.load(f).get("aliyun_api_key", "")
-        if not api_key:
-            print("[SEMANTIC] No API key found")
-            return None
-        _SEMANTIC_MATCHER = SemanticMatcher(api_key=api_key)
-        ok = _SEMANTIC_MATCHER.init()
-        if ok:
-            print(f"[SEMANTIC] 初始化完成: {len(_SEMANTIC_MATCHER._skill_names)} 个技能")
-        else:
-            print("[SEMANTIC] 初始化失败, 回退到关键词匹配")
-            _SEMANTIC_MATCHER = None
-        return _SEMANTIC_MATCHER
-    except Exception as e:
-        print(f"[SEMANTIC] 初始化异常: {e}")
-        return None
-
 # ── 上下文追踪：记住上次执行的技能 ──
 _CONTEXT = {"last_intent": None, "last_skill": None}
 
@@ -3556,7 +3525,12 @@ def _load_recent_email_context():
         return ""
 
 def match_intent(text):
-    """L3 意图匹配 — 语义匹配 + 微信关键词拦截"""
+    """L3 fast intent routing for explicit local skills.
+
+    Ordinary conversation skips remote embedding and falls through to the
+    Hermes/MiMo chat path.  Skill-specific natural-language reasoning remains
+    available there when these narrow local routes do not match.
+    """
     if not text:
         return None
     text_lower = text.lower()
@@ -3636,20 +3610,8 @@ def match_intent(text):
     if any(kw in text_lower for kw in ["moa", "聊天记录", "群聊"]):
         return ("moa", "moa", {})
 
-    # 2. 语义匹配
-    matcher = _get_semantic_matcher()
-    if matcher and matcher._init_ok:
-        skill_name = matcher.match(text)
-        if skill_name:
-            # Todo requests need the agent's structured action decision. The
-            # local list skill cannot distinguish mutation intent from a query.
-            if skill_name == "todo":
-                return None
-            for intent_id, cfg in INTENT_SKILL_MAP_SEMANTIC.items():
-                if cfg["skill"] == skill_name:
-                    return (intent_id, skill_name, cfg["params"])
-
-    # 3. 语义匹配不可用时的关键词降级
+    # 2. Explicit keyword fallback. Keep ambiguous todo operations in Hermes
+    # so the model can choose the structured action (add/done/delete/query).
     best_match = None
     max_len = 0
     for intent_id, cfg in INTENT_SKILL_MAP_SEMANTIC.items():
