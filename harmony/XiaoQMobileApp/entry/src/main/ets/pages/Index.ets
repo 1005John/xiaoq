@@ -31,6 +31,8 @@ struct Index {
   @State tilt: number = 150
   @State manualMode: boolean = false
   @State remoteState: string = '自动模式：表情控制云台'
+  @State runtimeState: string = '小Q状态未知'
+  @State runtimeBusy: boolean = false
   // Keep the Web component absent until the paired token is available. This
   // makes saving settings construct a fresh, authenticated camera request.
   @State cameraUrl: string = ''
@@ -169,9 +171,80 @@ struct Index {
       await this.saveConnection()
       this.online = await XiaoQApi.status() ? '小Q在线' : '小Q未运行'
       await this.syncGimbalMode()
+      await this.refreshRuntimeState()
     } catch (error) {
       this.online = `连接失败: ${(error as Error).message}`
     }
+  }
+
+  private async refreshRuntimeState(): Promise<void> {
+    this.applyConnection()
+    try {
+      const state = await XiaoQApi.runtimeState()
+      this.runtimeState = state.xiaoq_service === 'active' ? '小Q运行中' : '小Q已关闭'
+    } catch (error) {
+      this.runtimeState = '无法读取小Q状态'
+    }
+  }
+
+  private async startXiaoQ(): Promise<void> {
+    this.runtimeBusy = true
+    this.applyConnection()
+    try {
+      const state = await XiaoQApi.startXiaoQ()
+      this.runtimeState = state.xiaoq_service === 'active' ? '小Q运行中' : `小Q状态：${state.xiaoq_service}`
+      this.online = '小Q在线'
+      this.message('小Q已启动')
+    } catch (error) {
+      this.message((error as Error).message)
+    } finally {
+      this.runtimeBusy = false
+    }
+  }
+
+  private async stopXiaoQ(): Promise<void> {
+    this.runtimeBusy = true
+    this.applyConnection()
+    try {
+      const state = await XiaoQApi.stopXiaoQ()
+      this.runtimeState = state.xiaoq_service === 'inactive' ? '小Q已关闭' : `小Q状态：${state.xiaoq_service}`
+      this.online = '小Q未运行'
+      this.message('小Q已关闭')
+    } catch (error) {
+      this.message((error as Error).message)
+    } finally {
+      this.runtimeBusy = false
+    }
+  }
+
+  private async poweroffPi(): Promise<void> {
+    this.runtimeBusy = true
+    this.applyConnection()
+    try {
+      await XiaoQApi.poweroffPi()
+      this.runtimeState = '树莓派正在关机'
+      this.online = '树莓派正在关机'
+      this.message('树莓派正在关机')
+    } catch (error) {
+      this.message((error as Error).message)
+    } finally {
+      this.runtimeBusy = false
+    }
+  }
+
+  private confirmPoweroff(): void {
+    AlertDialog.show({
+      title: '关闭树莓派',
+      message: '树莓派将停止小Q和手机控制服务，需手动重新上电后才能连接。',
+      primaryButton: {
+        value: '取消',
+        action: (): void => {}
+      },
+      secondaryButton: {
+        value: '确认关机',
+        action: (): void => { this.poweroffPi() }
+      }
+    })
   }
 
   private async sendText(): Promise<void> {
@@ -321,6 +394,9 @@ struct Index {
           }
           if (index === 2) {
             this.loadLatestMeeting()
+          }
+          if (index === 3) {
+            this.refreshRuntimeState()
           }
         })
     }.width('100%').height('100%').backgroundColor('#101722')
@@ -701,6 +777,17 @@ struct Index {
         .backgroundColor('#1B2635').fontColor('#F4F7FB')
       Button('保存并测试连接').width('100%').onClick((): void => { this.checkConnection() })
       Text('设备令牌保存在树莓派 data/mobile_control_token。').fontSize(13).fontColor('#8290A4')
+      Divider().color('#2A3648').strokeWidth(1)
+      Text('设备控制').fontSize(20).fontColor('#F4F7FB').fontWeight(FontWeight.Medium)
+      Text(this.runtimeState).fontSize(14).fontColor('#C8D2E3').width('100%')
+      Row({ space: 10 }) {
+        Button('启动小Q').layoutWeight(1).enabled(!this.runtimeBusy)
+          .onClick((): void => { this.startXiaoQ() })
+        Button('关闭小Q').layoutWeight(1).enabled(!this.runtimeBusy)
+          .backgroundColor('#A85A36').onClick((): void => { this.stopXiaoQ() })
+      }.width('100%')
+      Button('树莓派关机').width('100%').enabled(!this.runtimeBusy)
+        .backgroundColor('#B6404C').onClick((): void => { this.confirmPoweroff() })
     }.padding(20).alignItems(HorizontalAlign.Start).width('100%')
   }
 }

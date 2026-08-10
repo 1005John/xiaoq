@@ -34,6 +34,11 @@ export interface GimbalState {
   tilt: number
 }
 
+export interface RuntimeState {
+  ok: boolean
+  xiaoq_service: string
+}
+
 export interface ChatResponse {
   ok: boolean
   status: string
@@ -111,6 +116,22 @@ export class XiaoQApi {
 
   static async status(): Promise<boolean> {
     return Boolean(JSON.parse(await XiaoQApi.request('/api/status', http.RequestMethod.GET, '')).xiaoq_online)
+  }
+
+  static async runtimeState(): Promise<RuntimeState> {
+    return JSON.parse(await XiaoQApi.request('/api/runtime', http.RequestMethod.GET, '')) as RuntimeState
+  }
+
+  static async startXiaoQ(): Promise<RuntimeState> {
+    return JSON.parse(await XiaoQApi.request('/api/runtime/start', http.RequestMethod.POST, '{}')) as RuntimeState
+  }
+
+  static async stopXiaoQ(): Promise<RuntimeState> {
+    return JSON.parse(await XiaoQApi.request('/api/runtime/stop', http.RequestMethod.POST, '{}')) as RuntimeState
+  }
+
+  static async poweroffPi(): Promise<void> {
+    await XiaoQApi.request('/api/runtime/poweroff', http.RequestMethod.POST, '{}')
   }
 
   static async chat(text: string, speakOnDevice: boolean): Promise<ChatResponse> {

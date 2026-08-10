@@ -602,6 +602,63 @@ def status():
     return jsonify({"ok": True, "xiaoq_online": ws_online, "camera_error": camera_stream.error, **state})
 
 
+def xiaoq_service_state() -> str:
+    result = subprocess.run(
+        ["systemctl", "is-active", "xiaoq.service"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.stdout.strip() or "unknown"
+
+
+def manage_xiaoq_service(action: str) -> tuple[bool, str]:
+    result = subprocess.run(
+        ["sudo", "-n", "systemctl", action, "xiaoq.service"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return False, result.stderr.strip() or result.stdout.strip() or f"systemctl {action} failed"
+    if action == "stop":
+        # start_xiaoq.sh exits with SIGTERM during an intentional stop.
+        subprocess.run(["sudo", "-n", "systemctl", "reset-failed", "xiaoq.service"],
+                       capture_output=True, text=True, timeout=10)
+    return True, xiaoq_service_state()
+
+
+@app.get("/api/runtime")
+def runtime_status():
+    return jsonify({"ok": True, "xiaoq_service": xiaoq_service_state()})
+
+
+@app.post("/api/runtime/start")
+def runtime_start():
+    ok, detail = manage_xiaoq_service("start")
+    if not ok:
+        return jsonify({"ok": False, "error": detail}), 502
+    return jsonify({"ok": True, "xiaoq_service": detail})
+
+
+@app.post("/api/runtime/stop")
+def runtime_stop():
+    ok, detail = manage_xiaoq_service("stop")
+    if not ok:
+        return jsonify({"ok": False, "error": detail}), 502
+    return jsonify({"ok": True, "xiaoq_service": detail})
+
+
+@app.post("/api/runtime/poweroff")
+def runtime_poweroff():
+    def poweroff_after_response() -> None:
+        time.sleep(2)
+        subprocess.run(["sudo", "-n", "systemctl", "poweroff"], capture_output=True, text=True, timeout=30)
+
+    threading.Thread(target=poweroff_after_response, daemon=True).start()
+    return jsonify({"ok": True, "accepted": True, "message": "poweroff scheduled"})
+
+
 @app.post("/api/chat")
 def chat():
     payload = request.get_json(silent=True) or {}
