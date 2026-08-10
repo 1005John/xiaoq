@@ -3938,6 +3938,87 @@ class VoiceManager:
         print(f"[Hermes] {llm_ms}ms, reply: {reply[:50]}")
         return reply, llm_ms
 
+    def _route_with_mimo(self, text):
+        """Use a small direct MiMo request to either answer chat or name a skill."""
+        import urllib.request as _ur
+
+        api_key = _get_mimo_api_key()
+        if not api_key:
+            return None
+
+        allowed_skills = {
+            "email", "todo", "weather", "news", "meeting", "remote_laptop",
+            "esp32_led", "lingji", "wechat", "moa", "ingest", "n6705b",
+        }
+        router_instruction = """你是小Q的快速语义路由器。只能输出一个合法 JSON 对象，不能输出 Markdown 或解释。
+普通聊天、问候、知识问答且不需要读取实时数据或操作设备时，输出：
+{"route":"chat","reply":"简洁自然的中文回复，最多80字"}
+需要邮件、待办、天气、新闻、会议、SSH笔记本、ESP32、微信、MOA、灵畿、N6705B等外部能力时，输出：
+{"route":"skill","skill":"技能名","arguments":{}}
+skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp32_led、lingji、wechat、moa、ingest、n6705b。
+不确定是否需要技能时选择 chat。你只负责理解和路由，不能声称已执行任何设备操作。"""
+        messages = [{
+            "role": "system",
+            "content": router_instruction + _get_persona_instruction(),
+        }]
+        messages.extend(self._history[-4:])
+        messages.append({"role": "user", "content": text})
+        body = json.dumps({
+            "model": "mimo-v2.5-pro",
+            "messages": messages,
+            "max_tokens": 220,
+            "response_format": {"type": "json_object"},
+        }, ensure_ascii=False).encode("utf-8")
+        request = _ur.Request(
+            "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+            data=body,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "api-key": api_key,
+            },
+        )
+        started_at = time.monotonic()
+        try:
+            with _ur.urlopen(request, timeout=30) as response:
+                content = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"]
+            decoder = json.JSONDecoder()
+            route = None
+            for match in re.finditer(r"\{", str(content)):
+                try:
+                    candidate, _ = decoder.raw_decode(str(content)[match.start():])
+                except ValueError:
+                    continue
+                if isinstance(candidate, dict):
+                    route = candidate
+                    break
+            if not isinstance(route, dict):
+                raise ValueError("MiMo did not return a JSON object")
+            route_type = str(route.get("route", "")).strip().lower()
+            if route_type == "chat":
+                reply = str(route.get("reply", "")).strip()
+                if not reply:
+                    raise ValueError("MiMo chat route has no reply")
+                self._history.extend([
+                    {"role": "user", "content": text},
+                    {"role": "assistant", "content": reply},
+                ])
+                self._history = self._history[-10:]
+                print(f"[MIMO-ROUTER] chat in {time.monotonic() - started_at:.2f}s: {reply[:50]}")
+                return {"route": "chat", "reply": reply}
+            if route_type == "skill":
+                skill = str(route.get("skill", "")).strip().lower()
+                if skill not in allowed_skills:
+                    raise ValueError(f"unsupported routed skill: {skill}")
+                arguments = route.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                print(f"[MIMO-ROUTER] skill in {time.monotonic() - started_at:.2f}s: {skill}")
+                return {"route": "skill", "skill": skill, "arguments": arguments}
+            raise ValueError(f"unsupported route: {route_type}")
+        except Exception as error:
+            print(f"[MIMO-ROUTER] failed: {error}")
+            return None
+
     def process_voice(self, wav_path):
         """语音流水线: ASR -> 人名纠错 -> shared skill routing -> TTS."""
         if self._pending:
@@ -4175,6 +4256,27 @@ class VoiceManager:
         except Exception as _reply_error:
             print(f"[Mobile] reply write failed: {_reply_error}")
 
+    def _finish_direct_chat(self, reply, speak, reply_path):
+        """Publish a direct MiMo chat reply without entering the Hermes agent."""
+        self.reply_text = reply
+        self._write_mobile_reply(reply_path, "completed", reply)
+        if ws_server:
+            ws_server.command_queue.append({
+                "type": "card_show",
+                "title": "回复",
+                "lines": [line for line in reply.split("\n") if line.strip()] or [reply],
+                "card_type": "todo",
+            })
+        if speak:
+            self.state = "speaking"
+            self.tts(
+                reply,
+                on_start=lambda: setattr(self, "state", "speaking"),
+                on_end=lambda: setattr(self, "state", "idle"),
+            )
+        else:
+            self.state = "idle"
+
     def process_text(self, txt, speak=True, reply_path=""):
         """直接处理文本；手机请求可选择是否播报，并等待文字结果。"""
         if self._pending:
@@ -4213,6 +4315,19 @@ class VoiceManager:
                 if (_CONTEXT.get("last_skill") == "email_knowledge"
                         or getattr(_email_skill, "_last_items", None)):
                     intent = ("email_followup", "email_knowledge", {})
+            if not intent:
+                mimo_route = self._route_with_mimo(txt)
+                if mimo_route and mimo_route["route"] == "chat":
+                    self._finish_direct_chat(mimo_route["reply"], speak, reply_path)
+                    return
+                if mimo_route and mimo_route["route"] == "skill":
+                    self._call_hermes(
+                        txt,
+                        speak=speak,
+                        reply_path=reply_path,
+                        route_hint=mimo_route["skill"],
+                    )
+                    return
             if intent:
                 intent_id, skill_name, skill_params = intent
                 print(f"[L3] Intent matched: {intent_id} → skill '{skill_name}'")
@@ -4273,7 +4388,7 @@ class VoiceManager:
         finally:
             self._pending = False
 
-    def _call_hermes(self, txt, speak=True, reply_path=""):
+    def _call_hermes(self, txt, speak=True, reply_path="", route_hint=""):
         """调用 Hermes API Server (v0.15.1, 常驻端口8086，无冷启动)"""
         import json as _json, urllib.request as _ur
 
@@ -4390,6 +4505,8 @@ class VoiceManager:
             _intent1 = "chat"
             _skill_data = ""
             _sys1 = "你是小Q桌面助手，用简洁口语回答。"
+            if route_hint:
+                _sys1 += f" 上游 MiMo 已判断此请求需要 {route_hint} 技能；请优先使用该能力完成任务。"
             _meeting_query = (
                 ("会议纪要" in txt and any(w in txt for w in [
                     "讨论", "内容", "决定", "待办", "总结", "说了什么", "提到", "安排", "结论",
