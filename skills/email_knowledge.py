@@ -76,7 +76,7 @@ class EmailKnowledgeSkill(Skill):
         except OSError as exc:
             log.warning("could not save email context: %s", exc)
 
-    def _analyze_previous(self, question: str):
+    def _analyze_previous(self, question: str, semantic_followup: bool = False):
         """Answer a follow-up from the previous date result semantically."""
         if not self._last_items or not LLM_CONFIG_FILE.exists():
             return None
@@ -98,7 +98,13 @@ class EmailKnowledgeSkill(Skill):
                             "只根据提供的邮件记录判断是否需要重点关注，关注截止日期、"
                             "明确待办、会议评审、测试风险、账号安全和需要回复的事项。"
                             "列出邮件主题并说明原因，不要编造记录中没有的信息。"
-                            "如果用户其实提出了与上一轮无关的新邮件问题，只输出 NEW_EMAIL_QUERY。"
+                            + (
+                                "上游语义路由已经确认这是对该集合的承接。"
+                                "必须直接根据记录回答，不能要求用户重复提供上下文，"
+                                "也不能输出 NEW_EMAIL_QUERY。"
+                                if semantic_followup else
+                                "如果用户其实提出了与上一轮无关的新邮件问题，只输出 NEW_EMAIL_QUERY。"
+                            )
                         ),
                     },
                     {
@@ -108,8 +114,10 @@ class EmailKnowledgeSkill(Skill):
                 ],
             )
             text = (response.choices[0].message.content or "").strip()
-            if not text or text == "NEW_EMAIL_QUERY":
+            if not text or (text == "NEW_EMAIL_QUERY" and not semantic_followup):
                 return None
+            if text == "NEW_EMAIL_QUERY":
+                return "根据刚才的邮件记录，没有识别到需要重点处理的事项。"
             self._last_analysis = text
             self._save_previous_items(analysis=text)
             return text
@@ -132,8 +140,9 @@ class EmailKnowledgeSkill(Skill):
         # Continue the previous date query before treating a follow-up as a
         # new full-text search. The model decides whether it is a true
         # follow-up, so phrases such as "这里面" do not need keyword rules.
-        if self._last_items and not date_hint:
-            previous_analysis = self._analyze_previous(asr_text)
+        semantic_followup = bool(params.get("_semantic_followup", False))
+        if self._last_items and (semantic_followup or not date_hint):
+            previous_analysis = self._analyze_previous(asr_text, semantic_followup=semantic_followup)
             if previous_analysis:
                 return SkillResult(
                     success=True,
@@ -145,6 +154,13 @@ class EmailKnowledgeSkill(Skill):
                         }),
                         SideEffect("voice_tts", {"text": previous_analysis[:500]}),
                     ],
+                )
+            if semantic_followup:
+                return SkillResult(
+                    success=True,
+                    side_effects=[SideEffect("voice_tts", {
+                        "text": "暂时无法分析刚才的邮件内容，请稍后再试。"
+                    })],
                 )
             return SkillResult(success=False, error="not an email follow-up")
 

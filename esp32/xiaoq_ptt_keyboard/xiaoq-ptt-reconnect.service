@@ -1,0 +1,14 @@
+[Unit]
+Description=Reconnect XiaoQ ESP32 push-to-talk keyboard
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+User=johnf
+ExecStart=/usr/local/sbin/xiaoq-ptt-reconnect
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,7 @@
-"""待办_Hermes技能 - 本地待办添加/完成 + 灵畿任务查询 + 时间提醒"""
+"""待办_Hermes技能 - 本地待办添加/完成 + 时间提醒"""
 import json
 import logging
 import re
-import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -12,7 +11,6 @@ from hermes_skills.base import HermesSkill
 log = logging.getLogger("hermes_skills.todo")
 
 SHANGHAI = timezone(timedelta(hours=8))
-LC_WORKSPACE = "CMIOTonemoredcap"
 TODOS_FILE = Path.home() / ".hermes" / "skills" / "todo" / "data" / "todos.json"
 
 # ── 数字中文转阿拉伯 ──
@@ -194,32 +192,5 @@ class TodoHermesSkill(HermesSkill):
                 context_parts.append(f"  {i}. {t.get('text','')}{remind}")
         else:
             context_parts.append("【本地待办】无")
-
-        # 灵畿任务
-        try:
-            r = subprocess.run(["lc","req","list","-w",LC_WORKSPACE], capture_output=True, text=True, timeout=15)
-            data = json.loads(r.stdout)
-            items = data.get("data",{}).get("items") or []
-            my_tasks = [t for t in items if "傅强" in (t.get("assignee") or "")]
-            if my_tasks:
-                context_parts.append(f"\n【灵畿任务（{len(my_tasks)}项）】")
-                for t in my_tasks[:15]:
-                    kw = t.get("key","")
-                    name = t.get("name","")
-                    status = t.get("status","")
-                    context_parts.append(f"  [{kw}] {name} ({status})")
-        except Exception as e:
-            context_parts.append(f"\n【灵畿任务】获取失败: {e}")
-
-        # 灵畿缺陷概览
-        try:
-            r = subprocess.run(["lc","bug","list","-w",LC_WORKSPACE], capture_output=True, text=True, timeout=15)
-            data = json.loads(r.stdout)
-            items = data.get("data",{}).get("items") or []
-            open_bugs = [b for b in items if b.get("status") not in ("已关闭",)]
-            my_bugs = [b for b in open_bugs if "傅强" in (b.get("handlerName") or "")]
-            context_parts.append(f"\n【灵畿缺陷】共{len(open_bugs)}个未关闭（你{len(my_bugs)}个）")
-        except Exception as e:
-            context_parts.append(f"\n【灵畿缺陷】获取失败: {e}")
 
         return {"context": "\n".join(context_parts), "action": None, "skip_llm": False, "reply": ""}

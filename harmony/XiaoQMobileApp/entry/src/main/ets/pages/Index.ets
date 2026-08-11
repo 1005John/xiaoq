@@ -2,7 +2,7 @@ import { webview } from '@kit.ArkWeb';
 import { promptAction } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { XiaoQApi } from '../common/XiaoQApi';
-import { Recorder } from '../common/Recorder';
+import { meetingRecorder } from '../common/Recorder';
 import { Uploader } from '../common/Uploader';
 
 interface MeetingActionItem {
@@ -51,7 +51,6 @@ struct Index {
   private cameraRefreshId: number = 0
   private photoRefreshId: number = 0
   private photoPollTimer: number = -1
-  private meetingRecorder: Recorder = new Recorder()
   private pttPressed: boolean = false
 
   aboutToAppear(): void {
@@ -60,6 +59,7 @@ struct Index {
     this.startPhotoPolling()
     this.refreshLatestPhoto()
     this.syncGimbalMode()
+    this.syncMeetingRecorder()
   }
 
   aboutToDisappear(): void {
@@ -73,6 +73,15 @@ struct Index {
     this.refreshCameraStream()
     this.startPhotoPolling()
     this.refreshLatestPhoto()
+    this.syncMeetingRecorder()
+  }
+
+  private syncMeetingRecorder(): void {
+    this.meetingRecording = meetingRecorder.isRecording
+    this.meetingPaused = meetingRecorder.isPaused
+    if (this.meetingRecording) {
+      this.meetingState = this.meetingPaused ? '已暂停录音' : '录音中（可锁屏或切到后台）'
+    }
   }
 
   private startPhotoPolling(): void {
@@ -393,6 +402,7 @@ struct Index {
             this.syncGimbalMode()
           }
           if (index === 2) {
+            this.syncMeetingRecorder()
             this.loadLatestMeeting()
           }
           if (index === 3) {
@@ -496,7 +506,7 @@ struct Index {
   private async startMeeting(): Promise<void> {
     this.applyConnection()
     try {
-      await this.meetingRecorder.start(getContext(this))
+      await meetingRecorder.start(getContext(this))
       this.meetingRecording = true
       this.meetingPaused = false
       this.meetingState = '录音中'
@@ -509,7 +519,7 @@ struct Index {
 
   private async pauseMeeting(): Promise<void> {
     try {
-      this.meetingPaused = await this.meetingRecorder.pauseOrResume()
+      this.meetingPaused = await meetingRecorder.pauseOrResume()
       this.meetingState = this.meetingPaused ? '已暂停录音' : '录音中'
     } catch (error) {
       this.message((error as Error).message)
@@ -519,7 +529,7 @@ struct Index {
   private async stopMeeting(): Promise<void> {
     try {
       this.meetingState = '正在保存录音'
-      const path = await this.meetingRecorder.stop()
+      const path = await meetingRecorder.stop()
       this.meetingRecording = false
       this.meetingPaused = false
       this.meetingState = '正在发送录音给小Q'

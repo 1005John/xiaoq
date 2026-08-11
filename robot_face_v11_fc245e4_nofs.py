@@ -3445,11 +3445,6 @@ INTENT_SKILL_MAP_SEMANTIC = {
         "params": {"action": "wooden_fish"},
         "tts_template": "",
     },
-    "lingji": {
-        "skill": "lingji",
-        "params": {},
-        "tts_template": "",
-    },
     "email_knowledge": {
         "skill": "email_knowledge",
         "params": {},
@@ -3541,7 +3536,6 @@ def match_intent(text):
             "news": ["新闻", "消息", "资讯"],
             "relax": ["放松", "木鱼", "休息"],
             "bgm": ["音乐", "听歌", "bgm"],
-            "lingji": ["灵畿", "任务"],
             "email_knowledge": ["邮件", "项目"],
             "wechat_knowledge": ["微信"],
             "ingest": ["刷新", "拉取", "更新"],
@@ -5024,7 +5018,7 @@ if gimbal_ctrl.connect():
 else:
     print('[WARN] 舵机未连接，表情将不带动舵机')
 
-# 定时数据采集器 (30分钟后台采集天气/新闻/灵畿任务)
+# 定时数据采集器 (30分钟后台采集天气和新闻)
 collector_cfg = {
     "interval_sec": 1800,  # 30分钟
     "latitude": 29.4316,
@@ -5037,7 +5031,6 @@ collector_cfg = {
         "https://www.ithome.com/rss/",
         "https://www.oschina.net/news/rss",
     ],
-    "lingji_workspace": "CMIOTonemoredcap",
 }
 data_collector = DataCollector(collector_cfg)
 data_collector.start()

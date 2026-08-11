@@ -1,13 +1,12 @@
 """
 skills/data_collector.py — 定时数据采集器
 
-每 30 分钟后台采集新闻、天气、灵畿任务，缓存到本地 JSON 文件。
+每 30 分钟后台采集新闻和天气，缓存到本地 JSON 文件。
 技能执行时优先读缓存，减少网络请求。
 
 采集内容:
   - WeatherSkill.fetch() → data/weather_cache.json
   - NewsSkill.fetch()    → data/news_cache.json
-  - lc req list          → data/lingji_cache.json
 
 启动方式: 在 v10 主循环入口调用 DataCollector.start()
 """
@@ -15,8 +14,6 @@ skills/data_collector.py — 定时数据采集器
 import asyncio
 import json
 import logging
-import os
-import subprocess
 import time
 import threading
 from pathlib import Path
@@ -28,10 +25,6 @@ log = logging.getLogger("skills.data_collector")
 CACHE_DIR = Path(__file__).parent.parent / "data"
 WEATHER_CACHE = CACHE_DIR / "weather_cache.json"
 NEWS_CACHE = CACHE_DIR / "news_cache.json"
-LINGJI_CACHE = CACHE_DIR / "lingji_cache.json"
-BUG_CACHE = CACHE_DIR / "bug_cache.json"
-BUG_CACHE = CACHE_DIR / "bug_cache.json"
-BUG_CACHE = CACHE_DIR / "bug_cache.json"
 
 
 # ═══════════════════════════════════════════
@@ -106,7 +99,7 @@ class DataCollector:
         self.interval = self.config.get("interval_sec", 1800)
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._latest = {"weather": None, "news": None, "lingji": None}
+        self._latest = {"weather": None, "news": None}
 
     def get_latest(self, key: str):
         return self._latest.get(key)
@@ -136,7 +129,6 @@ class DataCollector:
     def _collect_all(self):
         self._collect_weather()
         self._collect_news()
-        self._collect_lingji()
 
     async def _fetch_weather_async(self) -> dict:
         try:
@@ -240,44 +232,6 @@ class DataCollector:
         except Exception as e:
             log.error(f"News collect error: {e}")
 
-    def _collect_lingji(self):
-        try:
-            import subprocess, json as _json
-            workspace = self.config.get("lingji_workspace", "")
-            cmd = ["lc", "req", "list", "-l", "20", "--pretty"]
-            if workspace:
-                cmd.extend(["-w", workspace])
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0 and result.stdout.strip():
-                data = _json.loads(result.stdout)
-                raw_items = data
-                if isinstance(data, dict):
-                    inner = data.get("data", data)
-                    if isinstance(inner, dict):
-                        raw_items = inner.get("items", inner)
-                    else:
-                        raw_items = inner
-                tasks = raw_items if isinstance(raw_items, list) else []
-                if isinstance(tasks, list):
-                    # 只保留负责人是傅强的任务
-                    tasks = [t for t in tasks if t.get("assignee") == "傅强"]
-                    simplified = []
-                    for t in tasks:
-                        simplified.append({
-                            "id": t.get("key", t.get("id", "")),
-                            "title": t.get("name", t.get("title", "")),
-                            "status": t.get("status", ""),
-                            "key": t.get("key", ""),
-                        })
-                    CacheManager.save(LINGJI_CACHE, simplified)
-                    self._latest["lingji"] = simplified
-                    log.info(f"Lingji tasks cached: {len(simplified)} items")
-        except subprocess.TimeoutExpired:
-            log.warning("Lingji CLI timed out")
-        except Exception as e:
-            log.error(f"Lingji collect error: {e}")
-
-
 # ═══════════════════════════════════════════
 # 便捷函数：技能直接调用的缓存读取
 # ═══════════════════════════════════════════
@@ -290,13 +244,3 @@ def get_cached_weather(max_age: float = 3600) -> Optional[dict]:
 def get_cached_news(max_age: float = 3600) -> Optional[list]:
     """获取缓存的新闻数据（1小时内有效）"""
     return CacheManager.load(NEWS_CACHE, max_age)
-
-
-def get_cached_lingji(max_age: float = 3600) -> Optional[list]:
-    """获取缓存的灵畿任务数据（1小时内有效）"""
-    return CacheManager.load(LINGJI_CACHE, max_age)
-
-
-def get_cached_bugs(max_age: float = 3600) -> Optional[list]:
-    """获取缓存的缺陷数据（1小时内有效）"""
-    return CacheManager.load(BUG_CACHE, max_age)

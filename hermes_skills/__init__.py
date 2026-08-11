@@ -10,7 +10,6 @@ from hermes_skills.moa import MoaHermesSkill
 SKILL_MAP = {
     "weather": WeatherHermesSkill,
     "todo": TodoHermesSkill,
-    "lingji": TodoHermesSkill,    # 灵畿任务 = 待办
     "email_knowledge": EmailHermesSkill,
     "wechat_knowledge": WechatHermesSkill,
     "ingest": IngestHermesSkill,

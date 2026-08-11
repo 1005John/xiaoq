@@ -1,9 +1,8 @@
 """
-skills/todo.py — 待办清单技能 (本地待办+灵畿任务+提醒)
+skills/todo.py — 本地待办与提醒技能
 
 数据源：
-  1. 本地JSON: data/todos.json — 语音添加的待办（支持提醒时间）
-  2. 灵畿任务: 实时 lc req list
+  本地JSON: data/todos.json — 语音添加的待办（支持提醒时间）
 
 语音操作:
   - "待办" / "任务" → 列出所有待办
@@ -15,7 +14,6 @@ skills/todo.py — 待办清单技能 (本地待办+灵畿任务+提醒)
 import json
 import logging
 import re
-import subprocess
 import time
 import threading
 from pathlib import Path
@@ -106,15 +104,13 @@ def parse_remind_time(text: str) -> tuple:
 # ── TodoSkill ──
 
 class TodoSkill(Skill):
-    """待办清单技能: 本地待办 + 灵畿任务 + 提醒"""
+    """待办清单技能: 本地待办与提醒"""
 
     name = "todo"
     description = "待办清单"
 
     def __init__(self, cfg: dict = None):
         super().__init__(cfg)
-        cfg = cfg or {}
-        self.lingji_workspace = cfg.get("lingji_workspace", "CMIOTonemoredcap")
         self.data_dir = Path(__file__).parent.parent / "data"
         self.todos_file = self.data_dir / "todos.json"
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -195,7 +191,7 @@ class TodoSkill(Skill):
         all_items = []
         self._last_items = []
 
-        # 1. 本地手工待办
+        # 本地待办
         for t in self.todos:
             if not t.get("done"):
                 remind = ""
@@ -206,33 +202,11 @@ class TodoSkill(Skill):
                     except Exception:
                         remind = f" ⏰{t.get('remind_text','?')}"
                 all_items.append({
-                    "type": "manual", "title": t["title"],
+                    "type": "manual", "title": t.get("title") or t.get("text") or "（无内容）",
                     "status": f"待办{remind}", "source": "本地",
                     "id": t["id"], "sort_key": 0,
                 })
 
-        # 2. 灵畿任务 (实时查询)
-        try:
-            r = subprocess.run(
-                ["lc", "req", "list", "-w", self.lingji_workspace, "-l", "30"],
-                capture_output=True, text=True, timeout=15,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                data = json.loads(r.stdout)
-                items = data.get("data", {}).get("items") or []
-                for t in items:
-                    if t.get("assignee") != "傅强":
-                        continue
-                    if t.get("status") not in ("已完成", "已关闭", "取消"):
-                        all_items.append({
-                            "type": "lingji", "title": t.get("name", "?"),
-                            "status": f"[灵畿]{t.get('status','?')}",
-                            "source": "灵畿", "sort_key": 1,
-                        })
-        except Exception as e:
-            log.warning(f"Lingji fetch error: {e}")
-
-        # 3. 排序：本地待办在前，灵畿在后
         all_items.sort(key=lambda x: (x["sort_key"], x["title"]))
 
         self._last_items = all_items[:]
@@ -244,21 +218,13 @@ class TodoSkill(Skill):
                     SideEffect("voice_tts", {"text": "没有待办事项"}),
                 ])
 
-        manual_count = sum(1 for x in all_items if x["type"] == "manual")
-        lingji_count = len(all_items) - manual_count
-
         lines = []
         for i, item in enumerate(all_items, 1):
             title = item["title"]
             status = item["status"]
             lines.append(f"{i}. [ ] {title} ({status})")
 
-        tts_parts = []
-        if manual_count:
-            tts_parts.append(f"{manual_count}个本地待办")
-        if lingji_count:
-            tts_parts.append(f"{lingji_count}个灵畿任务")
-        tts = f"你有{'，'.join(tts_parts)}" if tts_parts else "没有待办"
+        tts = f"你有{len(all_items)}个待办"
 
         return SkillResult(success=True, data={"items": all_items},
             side_effects=[
@@ -290,9 +256,6 @@ class TodoSkill(Skill):
                     self.mark_done(item["id"])
                     return SkillResult(success=True,
                         side_effects=[SideEffect("voice_tts", {"text": f"已完成第{idx}项: {item['title'][:20]}"})])
-                elif item["type"] == "lingji":
-                    return SkillResult(success=True,
-                        side_effects=[SideEffect("voice_tts", {"text": "灵畿任务请登录平台处理"})])
             elif idx > 0:
                 pass  # fall through to list
 

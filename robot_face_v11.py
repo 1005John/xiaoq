@@ -3443,11 +3443,6 @@ INTENT_SKILL_MAP_SEMANTIC = {
         "params": {"action": "wooden_fish"},
         "tts_template": "",
     },
-    "lingji": {
-        "skill": "lingji",
-        "params": {},
-        "tts_template": "",
-    },
     "email_knowledge": {
         "skill": "email_knowledge",
         "params": {},
@@ -3539,7 +3534,6 @@ def match_intent(text):
             "news": ["新闻", "消息", "资讯"],
             "relax": ["放松", "木鱼", "休息"],
             "bgm": ["音乐", "听歌", "bgm"],
-            "lingji": ["灵畿", "任务"],
             "email_knowledge": ["邮件", "项目"],
             "wechat_knowledge": ["微信"],
             "ingest": ["刷新", "拉取", "更新"],
@@ -4259,7 +4253,7 @@ class VoiceManager:
             "- todo_query: 用户查看待办/任务清单\n"
             "- todo_action: 用户明确要添加/完成/删除待办，或设置提醒。reply必须是JSON: {\"action\":\"delete\",\"index\":\"all\"} 或 {\"action\":\"add\",\"text\":\"xxx\"} 或 {\"action\":\"done\",\"index\":N}。如果用户说\"删除这些/全部\"则index填\"all\"。如果不确定具体操作，intent改用chat。\n"
             "- chat: 普通聊天/问候/闲聊\n"
-            "- other: 以上都不是(查灵畿/邮件/会议总结/复杂任务)\n"
+            "- other: 以上都不是(查邮件/会议总结/复杂任务)\n"
             "对于chat，reply直接给出口语化回复(50字以内)。\n"
             "对于weather/news/todo_query，reply填\"\"即可。\n"
             "对于todo_action，reply格式: {\"action\":\"add\",\"text\":\"xxx\",\"remind_at\":\"ISO时间\"} 或 {\"action\":\"done\",\"index\":N} 或 {\"action\":\"delete\",\"index\":N}\n"
@@ -4792,7 +4786,7 @@ if gimbal_ctrl.connect():
 else:
     print('[WARN] 舵机未连接，表情将不带动舵机')
 
-# 定时数据采集器 (30分钟后台采集天气/新闻/灵畿任务)
+# 定时数据采集器 (30分钟后台采集天气和新闻)
 collector_cfg = {
     "interval_sec": 1800,  # 30分钟
     "latitude": 39.9042,
@@ -4805,7 +4799,6 @@ collector_cfg = {
         "https://www.ithome.com/rss/",
         "https://www.oschina.net/news/rss",
     ],
-    "lingji_workspace": "CMIOTonemoredcap",
 }
 data_collector = DataCollector(collector_cfg)
 data_collector.start()

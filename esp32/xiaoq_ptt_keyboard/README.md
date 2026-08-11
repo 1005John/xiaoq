@@ -15,3 +15,8 @@ Build with Arduino CLI:
 arduino-cli compile --fqbn esp32:esp32:esp32s3 xiaoq_ptt_keyboard
 arduino-cli upload -p /dev/cu.usbmodem13301 --fqbn esp32:esp32:esp32s3 xiaoq_ptt_keyboard
 ```
+
+After the first Raspberry Pi pairing, install `xiaoq-ptt-reconnect` and its
+systemd unit on the Pi. The service reconnects the trusted keyboard every
+eight seconds while it is in Bluetooth range, including after either device
+restarts.

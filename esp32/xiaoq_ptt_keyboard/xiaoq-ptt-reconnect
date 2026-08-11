@@ -1,0 +1,12 @@
+#!/bin/sh
+# Keep the paired BLE HID keyboard available after either device restarts.
+set -eu
+
+device='A4:CB:8F:D8:62:45'
+
+while :; do
+    if ! bluetoothctl info "$device" 2>/dev/null | grep -q 'Connected: yes'; then
+        bluetoothctl connect "$device" >/dev/null 2>&1 || true
+    fi
+    sleep 8
+done
