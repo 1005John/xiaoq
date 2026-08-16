@@ -602,12 +602,11 @@ class CameraStream:
     def _capture(self) -> None:
         camera = None
         try:
-            import cv2
-            from picamera2 import Picamera2
-
             # HailoFace exports a throttled JPEG in shared memory. Serving it
             # avoids opening a second Picamera2 while face/gesture inference is
-            # active.
+            # active. Fall back to a direct capture when XiaoQ is stopped or
+            # its shared frame is stale, otherwise the phone stream emits no
+            # bytes at all after a XiaoQ restart.
             shared_deadline = time.monotonic() + 2.0
             while not self.stop_event.is_set() and time.monotonic() < shared_deadline:
                 try:
@@ -625,15 +624,20 @@ class CameraStream:
                                 time.sleep(1 / 15)
                             except OSError:
                                 time.sleep(0.05)
-                        return
+                        if self.stop_event.is_set():
+                            return
+                        break
                 except OSError:
                     pass
                 time.sleep(0.05)
 
-            # No shared Hailo frame: explicitly reserve the camera and use the
-            # existing phone-only capture path.
+            if self.stop_event.is_set():
+                return
+
             send_command({"type": "camera_reserve"})
             time.sleep(0.6)
+            import cv2
+            from picamera2 import Picamera2
 
             camera = Picamera2()
             camera.configure(camera.create_preview_configuration(
