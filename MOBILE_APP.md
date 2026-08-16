@@ -37,6 +37,14 @@ curl http://127.0.0.1:8788/health
 | 自动模式 | `POST /api/gimbal/release` |
 | 视频页面 | `GET /api/camera` |
 
+### ESP32 语音回复
+
+带有 `X-XiaoQ-Reply-Channel: esp32` 请求头的语音上传会让小Q只返回文字，
+由移动网关使用 MiMo TTS 生成后重采样为 16 kHz、16-bit、单声道 PCM。ESP32 随后轮询
+`GET /api/voice/{job_id}`，仅在任务 `status` 为 `completed` 且 `audio_ready=true` 后下载
+`GET /api/voice/{job_id}/audio`，并通过自身 I2S 扬声器播放；这条链路不会触发
+小Q本机扬声器。
+
 ## 云台边界
 
 手机控制的树莓派端与 App 端均限制为：Pan `75` 到 `105` 度，Tilt `138` 到 `162` 度。这正是已有表情云台映射的最大范围。手动控制会停止人脸追踪并在 30 秒无新命令后自动释放；也可在 App 点击“恢复自动”。

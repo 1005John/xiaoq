@@ -11,4 +11,5 @@ data/todos.json
 *.bak
 *.bak_*
 esp32/xiaoq_led_controller/secrets.h
+esp32/xiaoq_audio_ptt/secrets.h
 data/esp32_devices.json

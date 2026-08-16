@@ -36,6 +36,7 @@ MEETING_JOBS = MEETING_ROOT / "jobs"
 CHAT_ROOT = MOBILE_ROOT / "chat"
 PHOTO_ROOT = MOBILE_ROOT / "photos"
 ESP32_LED_STATE_PATH = DATA_ROOT / "esp32_led_state.json"
+ESP32_DEBUG_STATE_PATH = DATA_ROOT / "esp32_debug_state.json"
 REMOTE_DEVICES_STATE_PATH = DATA_ROOT / "remote_devices.json"
 TODOS_PATH = DATA_ROOT / "todos.json"
 PORT = int(os.environ.get("XIAOQ_MOBILE_PORT", "8788"))
@@ -386,8 +387,102 @@ def transcribe_wav(wav_path: Path) -> str:
     return "".join(pieces).strip()
 
 
-def process_voice_job(job_path: Path, source: Path) -> None:
-    wav_path = source.with_suffix(".wav")
+def synthesize_esp32_tts(text: str, output_path: Path) -> None:
+    """Generate 16 kHz mono PCM matching the verified ESP32 I2S path."""
+    key = mimo_key()
+    if not key:
+        raise RuntimeError("MiMo API key is not configured")
+    payload = json.dumps({
+        "model": "mimo-v2.5-tts",
+        "messages": [
+            {"role": "user", "content": "用自然清晰的中文声音回答，语速适中。"},
+            {"role": "assistant", "content": text},
+        ],
+        "audio": {"format": "pcm16", "voice": os.environ.get("XIAOQ_ESP32_TTS_VOICE", "冰糖")},
+        "stream": True,
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(MIMO_URL, data=payload, headers={
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {key}",
+        "api-key": key,
+    })
+    temporary = output_path.with_suffix(output_path.suffix + ".24k.tmp")
+    audio_bytes = 0
+    try:
+        with urllib.request.urlopen(req, timeout=90) as response, temporary.open("wb") as target:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                try:
+                    item = json.loads(data)
+                    audio = item.get("choices", [{}])[0].get("delta", {}).get("audio", {})
+                    encoded = audio.get("data") if isinstance(audio, dict) else ""
+                    if encoded:
+                        chunk = base64.b64decode(encoded)
+                        target.write(chunk)
+                        audio_bytes += len(chunk)
+                except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+        if audio_bytes == 0:
+            raise RuntimeError("MiMo TTS returned no audio")
+        conversion = subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
+                "-i", str(temporary), "-f", "s16le", "-ar", "16000", "-ac", "1",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if conversion.returncode != 0 or not output_path.is_file() or output_path.stat().st_size == 0:
+            raise RuntimeError("failed to resample ESP32 TTS audio")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def finish_esp32_voice_job(job_path: Path, text: str) -> None:
+    """Wait for the renderer's text reply, then prepare its ESP32 audio."""
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        job = read_json(job_path)
+        if job.get("status") in {"completed", "failed"}:
+            if job.get("status") == "failed":
+                return
+            reply = str(job.get("reply", "")).strip()
+            if not reply:
+                update_job(job_path, status="failed", error="XiaoQ returned an empty reply")
+                return
+            try:
+                update_job(job_path, status="synthesizing", reply=reply)
+                audio_path = VOICE_ROOT / f"{job_path.stem}.reply.pcm"
+                synthesize_esp32_tts(reply, audio_path)
+                update_job(
+                    job_path,
+                    status="completed",
+                    reply=reply,
+                    audio_ready=True,
+                    audio_format="pcm_s16le",
+                    sample_rate=16000,
+                    channels=1,
+                )
+            except Exception as exc:
+                app.logger.exception("ESP32 TTS failed")
+                update_job(job_path, status="failed", error=str(exc)[:200])
+            return
+        time.sleep(0.5)
+    update_job(job_path, status="failed", error="XiaoQ reply timed out")
+
+
+def process_voice_job(job_path: Path, source: Path, esp32_reply: bool = False) -> None:
+    # Keep the uploaded source separate from ffmpeg's output. When ESP32 sends
+    # a WAV directly, using the same path for input and output makes ffmpeg
+    # fail with an in-place conversion error before ASR is reached.
+    wav_path = source.with_name(f"{source.stem}.converted.wav")
     try:
         update_job(job_path, status="transcribing")
         conversion = subprocess.run(
@@ -399,9 +494,18 @@ def process_voice_job(job_path: Path, source: Path) -> None:
         text = transcribe_wav(wav_path)
         if len(text) < 2:
             raise RuntimeError("no speech recognized")
-        if not send_command({"type": "voice_inject", "text": text}):
+        update_job(job_path, status="dispatching", transcript=text, reply_channel="esp32" if esp32_reply else "xiaoq")
+        if not send_command({
+            "type": "voice_inject",
+            "text": text,
+            "speak": not esp32_reply,
+            "reply_path": str(job_path) if esp32_reply else "",
+        }):
             raise RuntimeError("XiaoQ is not running")
-        update_job(job_path, status="dispatched", transcript=text)
+        if esp32_reply:
+            finish_esp32_voice_job(job_path, text)
+        else:
+            update_job(job_path, status="dispatched", transcript=text, reply_channel="xiaoq")
     except Exception as exc:
         app.logger.exception("voice job failed")
         update_job(job_path, status="failed", error=str(exc)[:160])
@@ -789,9 +893,16 @@ def voice_upload():
     if suffix not in VOICE_EXTENSIONS:
         return jsonify({"ok": False, "error": "unsupported audio format"}), 400
     job_id, job_path, _ = new_job("voice", filename)
+    esp32_reply = request.headers.get("X-XiaoQ-Reply-Channel", "").strip().lower() == "esp32"
+    if esp32_reply:
+        update_job(job_path, reply_channel="esp32")
     source = VOICE_ROOT / f"{job_id}{suffix}"
     uploaded.save(source)
-    threading.Thread(target=process_voice_job, args=(job_path, source), daemon=True).start()
+    threading.Thread(
+        target=process_voice_job,
+        args=(job_path, source, esp32_reply),
+        daemon=True,
+    ).start()
     return jsonify({"ok": True, "job_id": job_id, "status": "queued"}), 202
 
 
@@ -802,6 +913,37 @@ def voice_status(job_id: str):
     if not job:
         return jsonify({"ok": False, "error": "job not found"}), 404
     return jsonify({"ok": True, "job": job})
+
+
+@app.get("/api/voice/<job_id>/audio")
+def voice_audio(job_id: str):
+    """Serve the generated ESP32 PCM reply after the voice job completes."""
+    safe_id = secure_filename(job_id)
+    audio_path = VOICE_ROOT / f"{safe_id}.reply.pcm"
+    if not audio_path.is_file():
+        return jsonify({"ok": False, "error": "reply audio is not ready"}), 404
+    return send_file(
+        audio_path,
+        mimetype="application/octet-stream",
+        as_attachment=False,
+        download_name=f"{safe_id}.pcm",
+        max_age=0,
+    )
+
+
+@app.post("/api/esp32/debug")
+def esp32_debug():
+    """Persist the latest authenticated ESP32 playback stage for diagnostics."""
+    payload = request.get_json(silent=True) or {}
+    event = str(payload.get("event", "")).strip()[:120]
+    if not event:
+        return jsonify({"ok": False, "error": "event is required"}), 400
+    write_json(ESP32_DEBUG_STATE_PATH, {
+        "updated_at": iso_now(),
+        "event": event,
+        "job_id": str(payload.get("job_id", "")).strip()[:80],
+    })
+    return jsonify({"ok": True})
 
 
 @app.post("/api/meetings")
