@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import html
 import json
@@ -543,6 +544,8 @@ class CameraStream:
     def __init__(self):
         self.lock = threading.Lock()
         self.frame: bytes | None = None
+        self.frame_captured_at = 0.0
+        self.frame_source = ""
         self.error = ""
         self.started = False
         self.stop_event = threading.Event()
@@ -558,6 +561,8 @@ class CameraStream:
                 return
             self.error = ""
             self.frame = None
+            self.frame_captured_at = 0.0
+            self.frame_source = ""
             self.stop_event.clear()
             self.started = True
         # Prefer the frame exported by XiaoQ's existing Hailo pipeline. The
@@ -582,21 +587,41 @@ class CameraStream:
             self.started = False
             self.thread = None
             self.frame = None
+            self.frame_captured_at = 0.0
+            self.frame_source = ""
         send_command({"type": "camera_release"})
 
-    def snapshot(self, timeout: float = VISION_CAPTURE_TIMEOUT) -> bytes:
-        """Wait for the latest encoded frame without opening a second camera."""
+    def _publish_frame(self, frame: bytes, captured_at: float, source: str) -> None:
+        """Publish one JPEG together with when its source produced it."""
+        with self.lock:
+            self.frame = frame
+            self.frame_captured_at = captured_at
+            self.frame_source = source
+
+    def snapshot(self, timeout: float = VISION_CAPTURE_TIMEOUT, *, min_captured_at: float = 0.0) -> bytes:
+        """Wait for a JPEG, optionally requiring one newer than a request."""
         self.ensure_started()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self.lock:
                 frame = self.frame
                 error = self.error
+                captured_at = self.frame_captured_at
+                source = self.frame_source
             if error:
                 raise RuntimeError(error)
-            if frame:
+            if frame and captured_at >= min_captured_at:
+                app.logger.info(
+                    "vision frame selected source=%s age=%.3fs bytes=%d sha256=%s",
+                    source,
+                    max(0.0, time.time() - captured_at),
+                    len(frame),
+                    hashlib.sha256(frame).hexdigest()[:16],
+                )
                 return frame
             time.sleep(0.05)
+        if min_captured_at:
+            raise RuntimeError("camera did not produce a fresh frame in time")
         raise RuntimeError("camera frame timeout")
 
     def _capture(self) -> None:
@@ -615,12 +640,12 @@ class CameraStream:
                     ):
                         while not self.stop_event.is_set():
                             try:
-                                if time.time() - SHARED_CAMERA_FRAME_PATH.stat().st_mtime >= 2.0:
+                                source_mtime = SHARED_CAMERA_FRAME_PATH.stat().st_mtime
+                                if time.time() - source_mtime >= 2.0:
                                     break
                                 frame = SHARED_CAMERA_FRAME_PATH.read_bytes()
                                 if frame:
-                                    with self.lock:
-                                        self.frame = frame
+                                    self._publish_frame(frame, source_mtime, "hailo_shared")
                                 time.sleep(1 / 15)
                             except OSError:
                                 time.sleep(0.05)
@@ -648,8 +673,7 @@ class CameraStream:
                 frame = cv2.flip(camera.capture_array(), 1)
                 ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72])
                 if ok:
-                    with self.lock:
-                        self.frame = encoded.tobytes()
+                    self._publish_frame(encoded.tobytes(), time.time(), "picamera2")
                 time.sleep(1 / 15)
         except Exception as exc:
             app.logger.warning("camera unavailable: %s", exc)
@@ -858,9 +882,12 @@ def vision_chat():
     speak = bool(payload.get("speak", False))
     if len(text) < 2 or len(text) > MAX_VISION_TEXT:
         return jsonify({"ok": False, "error": "text must contain 2-2000 characters"}), 400
+    request_started_at = time.time()
     try:
         try:
-            frame = camera_stream.snapshot()
+            # Do not reuse a JPEG left by the phone's live preview. The image
+            # sent to MiMo must have been produced after this request arrived.
+            frame = camera_stream.snapshot(min_captured_at=request_started_at)
         finally:
             # The model call only needs the captured JPEG, not the live camera.
             camera_stream.stop()
@@ -1158,6 +1185,26 @@ def camera_video():
     if camera_stream.error:
         return jsonify({"ok": False, "error": camera_stream.error}), 503
     return Response(camera_stream.generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.get("/api/camera/snapshot")
+def camera_snapshot():
+    """Return a JPEG produced after this request, then release the camera."""
+    requested_at = time.time()
+    try:
+        frame = camera_stream.snapshot(timeout=12.0, min_captured_at=requested_at)
+        return Response(
+            frame,
+            mimetype="image/jpeg",
+            headers={"Cache-Control": "no-store, no-cache, max-age=0"},
+        )
+    except RuntimeError as exc:
+        app.logger.warning("camera snapshot failed: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 503
+    finally:
+        # The caller receives the bytes above, so retaining the camera only
+        # delays Hailo face tracking from resuming.
+        camera_stream.stop()
 
 
 @app.get("/api/camera")

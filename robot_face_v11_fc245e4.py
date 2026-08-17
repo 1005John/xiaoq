@@ -3571,6 +3571,20 @@ def _load_email_router_context():
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return ""
 
+def is_single_frame_vision_request(text):
+    """Recognize an unambiguous request to describe one live camera frame."""
+    normalized = re.sub(r"\s+", "", str(text or "").lower())
+    if not normalized:
+        return False
+    monitor_terms = ("监控", "持续", "定时", "巡检", "报警", "告警")
+    if any(term in normalized for term in monitor_terms):
+        return False
+    one_shot_phrases = (
+        "看到了什么", "看到什么", "看见什么", "看到了啥", "看到了什么东西",
+        "现在画面", "当前画面", "描述画面", "看看画面", "看一下画面",
+    )
+    return any(phrase in normalized for phrase in one_shot_phrases)
+
 def match_intent(text):
     """L3 fast intent routing for explicit local skills.
 
@@ -4324,6 +4338,132 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
         finally:
             self._pending = False
 
+    def _answer_current_camera(self, question, speak=True, reply_path=""):
+        """Answer one voice question from the Hailo-exported current camera frame."""
+        error_message = ""
+        try:
+            import base64 as _b64, urllib.request as _ur
+
+            frame_path = "/dev/shm/xiaoq_camera_latest.jpg"
+            request_started_ns = time.time_ns()
+            shared_deadline = time.monotonic() + 1.2
+            frame = b""
+            frame_source = "hailo_shared"
+            frame_age = 0.0
+            # Prefer a Hailo frame so face tracking keeps ownership of the
+            # camera. It must be newer than this question, never an old file.
+            while time.monotonic() < shared_deadline:
+                try:
+                    frame_stat = os.stat(frame_path)
+                    if frame_stat.st_mtime_ns > request_started_ns:
+                        with open(frame_path, "rb") as frame_file:
+                            frame = frame_file.read()
+                        frame_age = time.time() - frame_stat.st_mtime
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+
+            if not frame:
+                # Hailo can temporarily stop exporting its shared JPEG after
+                # a pipeline restart. Ask the mobile gateway for one direct
+                # capture; it reserves Picamera2 briefly and releases it as
+                # soon as the JPEG has been returned.
+                token_path = os.path.expanduser("~/xiaoq/data/mobile_control_token")
+                with open(token_path, encoding="utf-8") as token_file:
+                    token = token_file.read().strip()
+                snapshot_request = _ur.Request(
+                    "http://127.0.0.1:8788/api/camera/snapshot",
+                    headers={"X-XiaoQ-Token": token},
+                )
+                with _ur.urlopen(snapshot_request, timeout=18) as snapshot_response:
+                    frame = snapshot_response.read()
+                frame_source = "mobile_snapshot"
+                frame_age = 0.0
+            if not frame:
+                raise RuntimeError("摄像头画面为空")
+
+            api_key = _get_mimo_api_key()
+            if not api_key:
+                raise RuntimeError("MiMo API 密钥未配置")
+            payload = json.dumps({
+                "model": "mimo-v2.5",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是小Q的视觉助手。只根据当前摄像头画面回答用户问题；"
+                            "看不清或没有依据时明确说明，不要猜测。回答简洁自然。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": "data:image/jpeg;base64," + _b64.b64encode(frame).decode("ascii")
+                                },
+                            },
+                        ],
+                    },
+                ],
+                "max_tokens": 1000,
+                "stream": False,
+            }, ensure_ascii=False).encode("utf-8")
+            request = _ur.Request(
+                "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "api-key": api_key,
+                    "Authorization": f"Bearer {api_key}",
+                },
+            )
+            with _ur.urlopen(request, timeout=120) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            reply = str(data["choices"][0]["message"]["content"]).strip()
+            if not reply:
+                raise RuntimeError("MiMo 视觉接口没有返回文字回答")
+            print(
+                f"[VOICE-VISION] fresh frame source={frame_source} age={frame_age:.3f}s "
+                f"bytes={len(frame)}; mimo-v2.5 reply: {reply[:80]}"
+            )
+            try:
+                from skills.vision_monitor import remember_visual_context
+                remember_visual_context(question, reply, "voice")
+            except Exception as context_error:
+                print(f"[VOICE-VISION] unable to save context: {context_error}")
+        except Exception as error:
+            reply = f"视觉回答失败：{error}"
+            error_message = reply
+            print(f"[VOICE-VISION] failed: {error}")
+
+        self.reply_text = reply
+        self._write_mobile_reply(
+            reply_path,
+            "failed" if error_message else "completed",
+            reply if not error_message else "",
+            error_message,
+        )
+        if ws_server:
+            ws_server.command_queue.append({
+                "type": "card_show",
+                "title": "视觉回答",
+                "lines": [line for line in reply.split("\n") if line.strip()] or [reply],
+                "card_type": "todo",
+            })
+        if speak:
+            self.state = "speaking"
+            self.tts(
+                reply,
+                on_start=lambda: setattr(self, "state", "speaking"),
+                on_end=lambda: setattr(self, "state", "idle"),
+            )
+        else:
+            self.state = "idle"
+
     def _write_mobile_reply(self, reply_path, status, reply="", error=""):
         """写回手机对讲请求结果；普通本机语音链路不传 reply_path。"""
         if not reply_path:
@@ -4427,6 +4567,13 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                 return
 
             self.state = "thinking"
+
+            # An explicit one-shot camera question must not be interpreted as
+            # a persistent monitor task merely because older visual context
+            # exists in the conversation.
+            if is_single_frame_vision_request(txt):
+                self._answer_current_camera(txt, speak=speak, reply_path=reply_path)
+                return
 
             # ── L3 窄意图拦截 (迭代3) ──
             intent = match_intent(txt)
