@@ -41,3 +41,17 @@ After flashing, do not hold BOOT while resetting; GPIO0 is also the download
 mode strap pin.
 
 See [DESIGN.md](DESIGN.md) for the protocol, power requirement, and recovery behavior.
+
+## Acceptance checklist
+
+1. After reset, the serial console reports `ready` and the LED is green only
+   after Wi-Fi association succeeds.
+2. Hold BOOT: the LED changes immediately to blue and the serial console shows
+   `recording started`.
+3. Release BOOT: the LED returns to green (or off when Wi-Fi is unavailable),
+   the recording is uploaded, and the XiaoQ job reaches `audio_ready=true`.
+4. The reply is played through the external I2S amplifier. The INMP441 is not
+   an output device.
+
+If the LED changes but no reply is heard, first run the standalone
+`../xiaoq_audio_io` check, then verify the amplifier supply and shared ground.

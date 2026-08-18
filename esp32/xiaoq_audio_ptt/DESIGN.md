@@ -20,6 +20,9 @@ The ESP32-S3 must have a stable 5 V, 1 A or greater supply. The I2S amplifier
 and ESP32 share ground. USB power that is sufficient for idle Wi-Fi can still
 brown out during audio transfer or speaker output.
 
+INMP441 is the capture device only. It has no speaker output path; the reply
+audio is sent to the separate I2S amplifier on GPIO 7/15/16.
+
 ## Request Flow
 
 ```text
@@ -61,6 +64,17 @@ returns to green if Wi-Fi remains connected, otherwise off.
 - The firmware reports authenticated playback stages to the gateway's
   `/api/esp32/debug` endpoint for LAN diagnostics.
 - Wi-Fi automatically reconnects after playback or a dropped connection.
+
+## Bring-up order
+
+1. Flash `esp32/xiaoq_audio_io` and confirm both microphone levels and the
+   startup chime.
+2. Flash `esp32/xiaoq_audio_ptt`, configure `secrets.h`, and store the mobile
+   token over the serial console.
+3. Confirm the LED state sequence: off (offline), green (Wi-Fi connected),
+   blue while BOOT is held, then green/off after release.
+4. Test a short voice request before moving the board to a standalone power
+   adapter.
 
 ## Security
 
