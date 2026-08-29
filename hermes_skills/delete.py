@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """删除待办"""
-import json, sys
+import json, sys, os
 from pathlib import Path
 
-TODOS_FILE = Path.home() / "xiaoq" / "data" / "todos.json"
+TODOS_FILE = Path(os.environ.get("XIAOQ_ROOT", Path(__file__).resolve().parents[1])) / "data" / "todos.json"
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -26,6 +26,6 @@ if __name__ == "__main__":
         target['done'] = True
         target['deleted'] = True
         TODOS_FILE.write_text(json.dumps(todos, ensure_ascii=False, indent=2))
-        print(f"已删除: {target.get('text', '')}")
+        print(f"已删除: {target.get('text') or target.get('title') or '待办事项'}")
     else:
         print(f"没有第{idx+1}项待办")

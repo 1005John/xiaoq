@@ -74,7 +74,7 @@ class GimbalController:
             time.sleep(time_ms / 1000.0 + 0.1)
     
     def center(self, time_ms=1000):
-        self.move_to(90, 150, time_ms)
+        self.move_to(90, 145, time_ms)
 
 
 def interactive():

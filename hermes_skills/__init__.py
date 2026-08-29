@@ -6,6 +6,7 @@ from hermes_skills.wechat import WechatHermesSkill
 from hermes_skills.ingest import IngestHermesSkill
 from hermes_skills.others import NewsHermesSkill, ChatHermesSkill, BgmHermesSkill
 from hermes_skills.moa import MoaHermesSkill
+from hermes_skills.pir import PirHermesSkill
 
 SKILL_MAP = {
     "weather": WeatherHermesSkill,
@@ -17,6 +18,7 @@ SKILL_MAP = {
     "relax": ChatHermesSkill,
     "bgm": BgmHermesSkill,
     "moa": MoaHermesSkill,
+    "pir": PirHermesSkill,
 }
 
 def get_skill(name: str):

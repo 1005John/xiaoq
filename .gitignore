@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 logs/
+dist/
 *.log
 data/*_cache.json
 .env

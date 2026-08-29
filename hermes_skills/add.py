@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 SHANGHAI = timezone(timedelta(hours=8))
-TODOS_FILE = Path.home() / "xiaoq" / "data" / "todos.json"
+TODOS_FILE = Path(os.environ.get("XIAOQ_ROOT", Path(__file__).resolve().parents[1])) / "data" / "todos.json"
 
 
 _CN_NUM = {"一":1,"二":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9,"十":10,"半":0.5}

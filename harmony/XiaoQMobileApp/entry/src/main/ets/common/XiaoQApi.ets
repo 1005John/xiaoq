@@ -57,6 +57,20 @@ export interface PhotoStatus {
   available: boolean
   filename: string
   captured_at: string
+  source: string
+}
+
+export interface RegisteredFace {
+  id: string
+  name: string
+  sample_count: number
+  created_at: string
+}
+
+export interface FaceListResponse {
+  ok: boolean
+  people: RegisteredFace[]
+  active_person_id: string | null
 }
 
 interface TodoItem {
@@ -68,7 +82,7 @@ interface TodoResponse {
 }
 
 export class XiaoQApi {
-  static host: string = '192.168.137.220'
+  static host: string = '192.168.137.116'
   static token: string = ''
 
   static configure(host: string, token: string): void {
@@ -152,8 +166,12 @@ export class XiaoQApi {
     return result
   }
 
-  static async pttStart(): Promise<void> {
-    await XiaoQApi.request('/api/ptt/start', http.RequestMethod.POST, '{}')
+  static async pttStart(speakOnDevice: boolean, useVision: boolean): Promise<void> {
+    await XiaoQApi.request(
+      '/api/ptt/start',
+      http.RequestMethod.POST,
+      JSON.stringify({ speak: speakOnDevice, use_vision: useVision })
+    )
   }
 
   static async pttStop(): Promise<void> {
@@ -192,6 +210,22 @@ export class XiaoQApi {
       await XiaoQApi.request('/api/gimbal/mode', http.RequestMethod.POST, JSON.stringify({ mode: mode }))
     ) as GimbalState
     return result
+  }
+
+  static async faces(): Promise<FaceListResponse> {
+    return JSON.parse(await XiaoQApi.request('/api/faces', http.RequestMethod.GET, '')) as FaceListResponse
+  }
+
+  static async registerFace(name: string): Promise<void> {
+    await XiaoQApi.request('/api/faces/register', http.RequestMethod.POST, JSON.stringify({ name: name }))
+  }
+
+  static async selectFace(personId: string): Promise<void> {
+    await XiaoQApi.request('/api/faces/active', http.RequestMethod.POST, JSON.stringify({ person_id: personId }))
+  }
+
+  static async deleteFace(personId: string): Promise<void> {
+    await XiaoQApi.request(`/api/faces/${encodeURIComponent(personId)}`, http.RequestMethod.DELETE, '')
   }
 
   static async meetings(): Promise<MeetingItem[]> {

@@ -39,8 +39,13 @@ PHOTO_ROOT = MOBILE_ROOT / "photos"
 ESP32_LED_STATE_PATH = DATA_ROOT / "esp32_led_state.json"
 ESP32_DEBUG_STATE_PATH = DATA_ROOT / "esp32_debug_state.json"
 REMOTE_DEVICES_STATE_PATH = DATA_ROOT / "remote_devices.json"
+VISION_CONTEXT_PATH = DATA_ROOT / "vision_context.json"
 TODOS_PATH = DATA_ROOT / "todos.json"
+FACE_REGISTRY_PATH = DATA_ROOT / "face_registry.json"
 PORT = int(os.environ.get("XIAOQ_MOBILE_PORT", "8788"))
+# The production and demonstration deployments use different systemd units.
+# Keep the mobile API bound to the unit that launched this gateway.
+RUNTIME_SERVICE = os.environ.get("XIAOQ_RUNTIME_SERVICE", "xiaoq.service").strip()
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 VOICE_EXTENSIONS = {".m4a", ".mp3", ".wav", ".aac", ".ogg", ".webm"}
 MEETING_EXTENSIONS = VOICE_EXTENSIONS | {".wma"}
@@ -172,6 +177,34 @@ def record_visual_remote_devices(reply: str) -> str:
     return visible_reply
 
 
+def face_authorization_status() -> dict[str, Any]:
+    """Read the short-lived ArcFace authorization written by the renderer."""
+    try:
+        from face_identity import FaceRegistry
+        return FaceRegistry().authorization_status()
+    except Exception as error:
+        app.logger.warning("face authorization status unavailable: %s", error)
+        return {"authorized": False, "reason": "unavailable"}
+
+
+def face_authorization_reply(text: str, speak: bool = False):
+    """Return the demo's consistent denial reply without calling a model."""
+    reply = "人脸授权失败"
+    photo_capture_requested = send_command({"type": "face_auth_snapshot"})
+    speaker_dispatched = False
+    if speak:
+        speaker_dispatched = send_command({"type": "mobile_reply", "reply": reply, "speak": True})
+    return jsonify({
+        "ok": True,
+        "status": "completed",
+        "text": text,
+        "reply": reply,
+        "face_authorized": False,
+        "photo_capture_requested": photo_capture_requested,
+        "speaker_dispatched": speaker_dispatched,
+    })
+
+
 def meeting_tasks(filename: str) -> list[str]:
     """Extract user-editable action items from the standard meeting markdown."""
     path = MEETING_OUTPUT / filename
@@ -179,18 +212,38 @@ def meeting_tasks(filename: str) -> list[str]:
         content = path.read_text(encoding="utf-8")
     except OSError:
         return []
-    section = content.split("## 待办事项", 1)
-    if len(section) < 2:
+    # MiMo sometimes emits the section as plain "待办事项" instead of a
+    # Markdown level-2 heading. Accept both forms, then stop at the next
+    # heading (or the common "备注" section).
+    section_match = re.search(r"(?im)^\s*(?:#+\s*)?待办事项\s*$", content)
+    if section_match is None:
         return []
-    body = section[1].split("\n## ", 1)[0]
+    body = content[section_match.end():]
+    next_section = re.search(r"(?im)^\s*(?:#+\s*)?(?:备注|附注|说明)\s*$", body)
+    if next_section is not None:
+        body = body[:next_section.start()]
+    else:
+        next_heading = re.search(r"(?m)^\s*#{1,6}\s+", body)
+        if next_heading is not None:
+            body = body[:next_heading.start()]
     tasks: list[str] = []
     for line in body.splitlines():
         cleaned = line.strip()
         if not cleaned or cleaned.startswith("#"):
             continue
-        cleaned = cleaned.lstrip("-* ").strip()
+        # Ignore Markdown table headers/separators from older summaries.
+        if cleaned.startswith("|"):
+            if re.fullmatch(r"\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?", cleaned):
+                continue
+            if any(label in cleaned for label in ("负责人", "事项", "截止时间")):
+                continue
+            cleaned = cleaned.strip("|").replace("|", " ").strip()
+        # Only accept list-like lines so prose below the section cannot become
+        # a false todo. Support "1.", "1、", "-" and "*" forms.
+        cleaned = re.sub(r"^(?:[-*]\s+|\d+[.、）)]\s*)", "", cleaned).strip()
+        if not cleaned:
+            continue
         cleaned = cleaned.removeprefix("[ ]").removeprefix("[x]").strip()
-        cleaned = cleaned.split("：", 1)[-1].strip() if cleaned[:2].isdigit() and "：" in cleaned else cleaned
         if cleaned and cleaned not in tasks:
             tasks.append(cleaned[:300])
     return tasks[:30]
@@ -351,6 +404,15 @@ def vision_reply(question: str, frame: bytes) -> str:
     if not reply:
         raise RuntimeError("MiMo 视觉接口没有返回文字回答")
     return reply
+
+
+def remember_visual_context(question: str, reply: str, source: str = "mobile") -> None:
+    """Expose recent visual results to a later natural-language monitor task."""
+    try:
+        from skills.vision_monitor import remember_visual_context as remember
+        remember(question, reply, source)
+    except Exception as error:
+        app.logger.warning("unable to save vision context: %s", error)
 
 
 def transcribe_wav(wav_path: Path) -> str:
@@ -731,12 +793,18 @@ def status():
     ws_online = send_command({"type": "mobile_ping"})
     with gimbal_lock:
         state = dict(gimbal_state)
-    return jsonify({"ok": True, "xiaoq_online": ws_online, "camera_error": camera_stream.error, **state})
+    return jsonify({
+        "ok": True,
+        "xiaoq_online": ws_online,
+        "camera_error": camera_stream.error,
+        "face_auth": face_authorization_status(),
+        **state,
+    })
 
 
 def xiaoq_service_state() -> str:
     result = subprocess.run(
-        ["systemctl", "is-active", "xiaoq.service"],
+        ["systemctl", "is-active", RUNTIME_SERVICE],
         capture_output=True,
         text=True,
         timeout=10,
@@ -746,7 +814,7 @@ def xiaoq_service_state() -> str:
 
 def manage_xiaoq_service(action: str) -> tuple[bool, str]:
     result = subprocess.run(
-        ["sudo", "-n", "systemctl", action, "xiaoq.service"],
+        ["sudo", "-n", "systemctl", action, RUNTIME_SERVICE],
         capture_output=True,
         text=True,
         timeout=30,
@@ -755,7 +823,7 @@ def manage_xiaoq_service(action: str) -> tuple[bool, str]:
         return False, result.stderr.strip() or result.stdout.strip() or f"systemctl {action} failed"
     if action == "stop":
         # start_xiaoq.sh exits with SIGTERM during an intentional stop.
-        subprocess.run(["sudo", "-n", "systemctl", "reset-failed", "xiaoq.service"],
+        subprocess.run(["sudo", "-n", "systemctl", "reset-failed", RUNTIME_SERVICE],
                        capture_output=True, text=True, timeout=10)
     return True, xiaoq_service_state()
 
@@ -831,10 +899,17 @@ def chat():
 def ptt_start():
     """Start XiaoQ's local microphone, matching a Space key-down event."""
     global ptt_active
+    payload = request.get_json(silent=True) or {}
+    speak = bool(payload.get("speak", True))
+    use_vision = bool(payload.get("use_vision", False))
     with ptt_lock:
         if ptt_active:
             return jsonify({"ok": True, "active": True, "already_active": True})
-        if not send_command({"type": "voice_start"}):
+        if not send_command({
+            "type": "voice_start",
+            "speak": speak,
+            "use_vision": use_vision,
+        }):
             return jsonify({"ok": False, "error": "xiaoq offline"}), 503
         ptt_active = True
     return jsonify({"ok": True, "active": True})
@@ -882,6 +957,8 @@ def vision_chat():
     speak = bool(payload.get("speak", False))
     if len(text) < 2 or len(text) > MAX_VISION_TEXT:
         return jsonify({"ok": False, "error": "text must contain 2-2000 characters"}), 400
+    if not face_authorization_status().get("authorized"):
+        return face_authorization_reply(text, speak)
     request_started_at = time.time()
     try:
         try:
@@ -892,6 +969,7 @@ def vision_chat():
             # The model call only needs the captured JPEG, not the live camera.
             camera_stream.stop()
         reply = record_visual_remote_devices(record_visual_led_state(vision_reply(text, frame)))
+        remember_visual_context(text, reply)
     except RuntimeError as exc:
         app.logger.warning("vision chat failed: %s", exc)
         status_code = 503 if "camera" in str(exc).lower() else 502
@@ -1179,6 +1257,66 @@ def gimbal_release():
     return jsonify({"ok": True, **state})
 
 
+def face_registry_view() -> dict[str, Any]:
+    """Expose enrollment metadata without ever returning face embeddings."""
+    raw = read_json(FACE_REGISTRY_PATH)
+    people = raw.get("people", []) if isinstance(raw, dict) else []
+    result = []
+    for person in people:
+        if not isinstance(person, dict):
+            continue
+        person_id = str(person.get("id", "")).strip()
+        name = str(person.get("name", "")).strip()
+        if not person_id or not name:
+            continue
+        result.append({
+            "id": person_id,
+            "name": name,
+            "sample_count": int(person.get("sample_count", 0) or 0),
+            "created_at": str(person.get("created_at", "")),
+        })
+    active = raw.get("active_person_id") if isinstance(raw, dict) else None
+    return {"people": result, "active_person_id": active if isinstance(active, str) else None}
+
+
+@app.get("/api/faces")
+def face_list():
+    return jsonify({"ok": True, **face_registry_view()})
+
+
+@app.post("/api/faces/register")
+def face_register():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not name or len(name) > 32 or "\n" in name or "\r" in name:
+        return jsonify({"ok": False, "error": "name must be 1 to 32 characters"}), 400
+    if any(person["name"] == name for person in face_registry_view()["people"]):
+        return jsonify({"ok": False, "error": "face name already exists"}), 409
+    if not send_command({"type": "face_register", "name": name}):
+        return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+    return jsonify({"ok": True, "status": "started", "name": name})
+
+
+@app.post("/api/faces/active")
+def face_select_active():
+    payload = request.get_json(silent=True) or {}
+    person_id = str(payload.get("person_id", "")).strip()
+    if person_id and not any(person["id"] == person_id for person in face_registry_view()["people"]):
+        return jsonify({"ok": False, "error": "face not found"}), 404
+    if not send_command({"type": "face_target_select", "person_id": person_id}):
+        return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+    return jsonify({"ok": True, "active_person_id": person_id or None})
+
+
+@app.delete("/api/faces/<person_id>")
+def face_delete(person_id: str):
+    if not person_id or not any(person["id"] == person_id for person in face_registry_view()["people"]):
+        return jsonify({"ok": False, "error": "face not found"}), 404
+    if not send_command({"type": "face_delete", "person_id": person_id}):
+        return jsonify({"ok": False, "error": "xiaoq offline"}), 503
+    return jsonify({"ok": True})
+
+
 @app.get("/api/camera/stream")
 def camera_video():
     camera_stream.ensure_started()
@@ -1225,17 +1363,18 @@ def photo_status():
     """Return the latest gesture-triggered photo without opening the camera."""
     latest = PHOTO_ROOT / "latest.json"
     if not latest.exists():
-        return jsonify({"ok": True, "available": False, "filename": "", "captured_at": ""})
+        return jsonify({"ok": True, "available": False, "filename": "", "captured_at": "", "source": ""})
     metadata = read_json(latest)
     filename = secure_filename(str(metadata.get("filename", "")))
     photo = PHOTO_ROOT / filename if filename else None
     if not photo or not photo.exists():
-        return jsonify({"ok": True, "available": False, "filename": "", "captured_at": ""})
+        return jsonify({"ok": True, "available": False, "filename": "", "captured_at": "", "source": ""})
     return jsonify({
         "ok": True,
         "available": True,
         "filename": filename,
         "captured_at": str(metadata.get("captured_at", "")),
+        "source": str(metadata.get("source", "")),
     })
 
 

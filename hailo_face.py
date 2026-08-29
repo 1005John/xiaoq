@@ -18,20 +18,28 @@ from hailo_face_pipeline import HailoFacePipeline
 
 PAN_MIN, PAN_MAX = 50.0, 130.0
 TILT_MIN, TILT_MAX = 138.0, 162.0
-PC, TC = 90.0, 150.0
+PC, TC = 90.0, 145.0
 
 
 class HailoFace:
-    """与 BaiduFace 完全一致的接口, 内部使用 Hailo-8L SCRFD 2.5G"""
+    """Hailo face detector plus optional enrolled-person following."""
 
-    def __init__(self, gimbal_ctrl, frame_callback=None):
+    def __init__(self, gimbal_ctrl, frame_callback=None, registry=None):
         self.gimbal = gimbal_ctrl
         self.frame_callback = frame_callback
+        self.registry = registry
         self.running = False
         self.face_detected = False
+        self.following_target = False
         self.face_pan = PC
         self.face_tilt = TC
         self.lock = threading.Lock()
+        # Once the selected identity has been confirmed, keep following its
+        # Hailo tracker ID between ArcFace refreshes. ArcFace is intentionally
+        # sampled at a lower rate than detection, so requiring a fresh vector
+        # on every frame makes the gimbal fall back to expressions.
+        self._locked_track_id: int | None = None
+        self._last_follow_log = 0.0
 
         self._pipeline = None
         self._queue = queue.Queue(maxsize=5)
@@ -43,7 +51,7 @@ class HailoFace:
         self.running = True
 
         # 启动 Hailo 推理管线
-        self._pipeline = HailoFacePipeline(self._queue, self._on_pipeline_frame)
+        self._pipeline = HailoFacePipeline(self._queue, self._on_pipeline_frame, self.registry)
         self._pipeline.start()
 
         # 启动追踪线程
@@ -54,14 +62,28 @@ class HailoFace:
 
     def _on_pipeline_frame(self, frame, detections):
         """Forward every camera frame; a face box is optional."""
+        self._record_active_identity_match(detections)
         if self.frame_callback is None:
             return
         try:
-            best = max(detections, key=lambda item: item.confidence) if detections else None
+            best = self._choose_target(detections)
             bbox = best.bbox if best is not None and best.confidence >= 0.3 else None
             self.frame_callback(frame, bbox)
         except Exception as exc:
             print(f"[HailoFace] frame callback error: {exc}")
+
+    def _record_active_identity_match(self, detections):
+        """Refresh authorization only when ArcFace sees the App-selected face."""
+        if not self.registry:
+            return
+        active_person_id = self.registry.active_person_id()
+        if not active_person_id:
+            return
+        matches = [item for item in detections if item.person_id == active_person_id]
+        if not matches:
+            return
+        best = max(matches, key=lambda item: item.identity_score)
+        self.registry.record_authorization(best.person_id, best.person_name, best.identity_score)
 
     def stop(self):
         self.running = False
@@ -69,6 +91,8 @@ class HailoFace:
             self._pipeline.stop()
             self._pipeline = None
         self.face_detected = False
+        self.following_target = False
+        self._locked_track_id = None
 
     # ── 追踪线程 ────────────────────────────────────────
 
@@ -89,7 +113,8 @@ class HailoFace:
                 for pan in [90, 70, 110]:
                     if not self.running:
                         break
-                    self.gimbal.move_to(pan, TC, 400, blocking=True)
+                    # Slow the search sweep for smoother, less abrupt motion.
+                    self.gimbal.move_to(pan, TC, 1000, blocking=True)
                     t0 = time.time()
                     while time.time() - t0 < 1.5 and self.running:
                         try:
@@ -107,6 +132,7 @@ class HailoFace:
                             self.face_pan = target_pan
                             self.face_tilt = target_tilt
                             self.face_detected = True
+                            self.following_target = True
                             print(f"[HailoFace] FOUND sweep pan={pan} "
                                   f"-> pan={target_pan:.0f} tilt={target_tilt:.0f}")
                             found = True
@@ -118,6 +144,7 @@ class HailoFace:
                 break
             if not found:
                 self.face_detected = False
+                self.following_target = False
                 time.sleep(0.2)
                 continue
 
@@ -138,37 +165,76 @@ class HailoFace:
                     except Exception as exc:
                         print(f"[HailoFace] _face_to_angles error: {exc}")
                         continue
-                    if target_pan is not None:
-                        target_pan = max(PAN_MIN, min(PAN_MAX, target_pan))
-                        target_tilt = max(TILT_MIN, min(TILT_MAX, target_tilt))
-                        cur_pan += (target_pan - cur_pan) * 0.25
-                        cur_tilt += (target_tilt - cur_tilt) * 0.25
-                        cur_pan = max(PAN_MIN, min(PAN_MAX, cur_pan))
-                        cur_tilt = max(TILT_MIN, min(TILT_MAX, cur_tilt))
-                        self.face_pan = cur_pan
-                        self.face_tilt = cur_tilt
-                        self.face_detected = True
-                        if self.gimbal:
-                            self.gimbal.move_to(int(cur_pan), int(cur_tilt), 200, blocking=False)
+                    if target_pan is None:
+                        # Other people can remain in frame after the selected
+                        # person leaves.  They must not keep target ownership.
+                        lost += 1
+                        self.face_detected = False
+                        self.following_target = False
+                        if lost >= 20:
+                            break
+                        time.sleep(0.05)
+                        continue
+                    target_pan = max(PAN_MIN, min(PAN_MAX, target_pan))
+                    target_tilt = max(TILT_MIN, min(TILT_MAX, target_tilt))
+                    cur_pan += (target_pan - cur_pan) * 0.25
+                    cur_tilt += (target_tilt - cur_tilt) * 0.25
+                    cur_pan = max(PAN_MIN, min(PAN_MAX, cur_pan))
+                    cur_tilt = max(TILT_MIN, min(TILT_MAX, cur_tilt))
+                    self.face_pan = cur_pan
+                    self.face_tilt = cur_tilt
+                    self.face_detected = True
+                    self.following_target = True
+                    if self.gimbal:
+                        self.gimbal.move_to(int(cur_pan), int(cur_tilt), 200, blocking=False)
+                    now = time.monotonic()
+                    if now - self._last_follow_log >= 2.0:
+                        self._last_follow_log = now
+                        print(f"[HailoFace] FOLLOW track={self._locked_track_id or 0} "
+                              f"pan={cur_pan:.0f} tilt={cur_tilt:.0f}")
                 else:
                     lost += 1
                     if lost >= 5:
                         self.face_detected = False
+                        self.following_target = False
                     if lost >= 20:  # ~3s 无脸 -> 重新扫描
                         break
                 time.sleep(0.05)
 
             self.face_detected = False
+            self.following_target = False
             time.sleep(0.1)
 
         self.face_detected = False
+        self.following_target = False
         print("[HailoFace] Exit")
+
+    def _choose_target(self, detections):
+        """Return the requested enrolled person, or preserve legacy behavior."""
+        if not detections:
+            return None
+        active_person_id = self.registry.active_person_id() if self.registry else None
+        if active_person_id:
+            if self._locked_track_id is not None:
+                locked = [item for item in detections if item.track_id == self._locked_track_id]
+                if locked:
+                    return max(locked, key=lambda item: item.confidence)
+            candidates = [item for item in detections if item.person_id == active_person_id]
+            if candidates:
+                best = max(candidates, key=lambda item: item.identity_score)
+                self._locked_track_id = best.track_id
+                return best
+            return None
+        self._locked_track_id = None
+        return max(detections, key=lambda item: item.confidence)
 
     def _face_to_angles(self, detections):
         """检测结果 → (pan, tilt) 角度"""
         if not detections:
             return None, None
-        best = max(detections, key=lambda d: d.confidence)
+        best = self._choose_target(detections)
+        if best is None:
+            return None, None
         if best.confidence < 0.3:
             return None, None
         bbox = best.bbox

@@ -154,6 +154,7 @@ class TodoSkill(Skill):
         for t in self.todos:
             if t["id"] == todo_id and not t["done"]:
                 t["done"] = True
+                t["completed_at"] = datetime.now(SHANGHAI).isoformat()
                 t["remind_at"] = None
                 t["notified"] = True
                 self._save()

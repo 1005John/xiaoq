@@ -110,7 +110,13 @@ void configureBootButton() {
 
 void connectWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // CMCC-IOT is an open network. Use the SSID-only overload to avoid an
+  // empty password being interpreted as WPA credentials by the ESP32-S3.
+  if (strlen(WIFI_PASSWORD) == 0) {
+    WiFi.begin(WIFI_SSID);
+  } else {
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  }
   lastWifiAttemptMs = millis();
   Serial.printf("[ptt] connecting to Wi-Fi %s\n", WIFI_SSID);
 }

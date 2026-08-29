@@ -117,6 +117,8 @@ class SkillManager:
         from .wechat_knowledge import WechatKnowledgeSkill
         from .esp32_led import Esp32LedSkill
         from .remote_laptop import RemoteLaptopSkill
+        from .vision_monitor import VisionMonitorSkill, get_vision_monitor_service
+        from .off_work import OffWorkSkill
 
         cfg = cfg or {}
         self.register(TodoSkill(cfg.get("todo", {})))
@@ -129,4 +131,6 @@ class SkillManager:
         self.register(WechatKnowledgeSkill(cfg.get("wechat_knowledge", {})))
         self.register(Esp32LedSkill())
         self.register(RemoteLaptopSkill())
+        self.register(VisionMonitorSkill(get_vision_monitor_service()))
+        self.register(OffWorkSkill())
         return self

@@ -1,154 +1,132 @@
-# 小Q — 系统设计
+# XiaoQ Face Authorization Demo - Design
 
-> 版本：v1.6.0 | 日期：2026-06-14
+> Version: 2.0.0-demo | Updated: 2026-08-29
 
-## 1. 架构概览
+## Purpose
 
-```
-┌──────────���───────────────���───────────────���───────────────���───┐
-│                      robot_face_v11.py                        │
-│                                                               │
-│  ┌────���────┐  ┌───���──────┐  ┌─────────────────���┐            │
-│  │ pygame  │  │ tate    │  │ NPCStateMachin%  │            │
-│  │ 渲染    │  │ Machine  │  ��� (行为/人格)       │            │
-│  └─────────���  └────────���─┘  └──────���───────────┘            │
-│                                                               │
-│  ┌─────────���───────────────���───────────────���────────────┐    │
-│  │ 语音流水线（pro#ess_voice）                            │    │
-│  │ 麦克风 → WAV → ASR(MiMo) → 人名纠错×2                 │    │
-│  │   → _callhermes() → JSON指令解析 → 卡片 + TTS        │    │
-│  └──���───────────────���───────────────���───────────────���───┘    │
-│                                                               │
-│  ┌─────────���  ┌────────���─┐  ┌──────���─────────┐              │
-│  │ Gimbal  │  │ VFX      │  │ Ambient        │              │
-│  │ 云台控制 │  │ 粒子特效  │  │ 环境动画        │              │
-│  └──���──────┘  └──────────┘  └───────────────���┘              │
-└───────���───────────────���───────────────���───────────────���──────┘
-         │                    │
-         ▼                    ▼
-┌────���─────────────┐  ┌──────────���───────────┐
-│ Hermes v0.15.1   │  │ 外部服务               │
-│                  │  │ • MiMo-V2.5-Pro(LLM)  │
-│ _call_hermes():  │  │ • MiMo-V2.5-ASR       │
-│  1. API Server   │  │ • MiMo-2.5-TTS(冰糖) │
-│     :8086 (优先) │  │ • open-meteo.com(天气) │
-│  2. CLI 回退     │  │ • RSS 源(新闻)         │
-│                  │  │ • data_colle#tor(缓存) │
-│ Skills:          │  └──────���───────────────���
-│ • pi-weather     │
-│ • pi-news        │
-│ • pi-todo(JSON)  │
-│ • pi-moa         │
-│ • pi-email       │
-│ • pi-bug         │
-└─────────────���────┘
+This project is the deployable XiaoQ demonstration build. It combines the
+desktop robot runtime, Hailo-powered face registration and tracking, mobile
+control, MiMo speech/vision services, ESP32 peripherals, and office-oriented
+skills in one isolated deployment.
+
+The demo uses its own runtime directory (`/home/johnf/xiaoq-face-auth-demo`)
+and its own systemd units. It must not run alongside the production XiaoQ
+runtime because both use the same camera, display, audio devices, and gimbal.
+
+## Runtime Architecture
+
+```text
+Mobile App / ESP32 voice remote
+             |
+             v
+mobile_control.py :8788
+             |
+             v
+robot_face_v11_fc245e4.py
+  |-- Pygame renderer and expression state machines
+  |-- MiMo ASR -> semantic skill router / MiMo chat -> streaming MiMo TTS
+  |-- Hermes skill execution for multi-step office tasks
+  |-- Hailo SCRFD + ArcFace registration, recognition, and tracking
+  |-- GimbalController -> serial Pan/Tilt servos
+  |-- shared camera frame -> visual Q&A, gesture photo, monitoring
+  |-- reminder and off-work background services
+             |
+             +-- WebSocket :8766 (loopback only)
 ```
 
-## 2. 语音流水线
+The mobile gateway is the only LAN-facing service. It forwards requests to the
+renderer through a loopback WebSocket, so the renderer itself is not exposed
+on the LAN.
 
-` `
-麦克风 → WAV (16kHz mono)
-  → ASR: MiMo-V2.5-ASR (toke.-plan-cn.xiaomi-imo.com)
-  → ���名纠错 ×2 (skills/name_co2rector.py, 100人/734条)
-  → _call_hermes(tx4)
-     ├── [优先] POST http://127.0.0.1:8086/v1/chat/completions
-     │          model: mimo-v2.5-pro
-     │          system prompt 含 JSON 格式���令
-     │          → Hermes Gateway 常驻处理
-     │
-     └── [回退] hermes chat -q --provi$er deepseek
-  → JSON 指令解析（后台，用户无感）
-     ├── {"action":"add","text":"完整原文（包括时间）"} → add.py (raw_text + clean_label)
-     ├── {"action":"query"}            → query.py
-     ├── {"action":"done","index":N}   → done.py
-     └── {"action":"delete","index":N} → delete.py
-  → 卡片显示（JSON 行已剥离）+ TTS 播报
-     • 完整回复显示为卡片
-     • >40字时 qwen-turbo 摘要 TTS
-     • TTS: MiMo-V2.5-TTS (冰糖, 24kHz PCM16 → WAV + aplay plughw:2,0)
-     • TTS 后台线程播放，不阻塞主循环渲染
+## Face Authorization Demo
+
+The authorization rule is intentionally stricter than the ordinary XiaoQ
+build:
+
+1. A person is registered from the mobile app using the XiaoQ camera.
+2. The user selects that registered person as the tracking target.
+3. Hailo ArcFace must identify the selected person with a cosine score of at
+   least `0.68` within the previous two seconds.
+4. Each local voice request, mobile text request, mobile vision request, and
+   ESP32 voice request checks this state before ASR, Hermes, skills, or an LLM
+   is invoked.
+5. A failed check returns `人脸授权失败` and queues one fresh photo for the
+   mobile app.
+
+Selecting "任意人脸跟踪" disables the authorization gate and retains ordinary
+face-following behavior. Enrollment metadata and face embeddings remain in
+`data/face_registry.json`; the short-lived authorization state contains only
+the selected identity, score, and timestamp.
+
+## Main Capabilities
+
+| Area | Demo capability |
+| --- | --- |
+| Interaction | Local push-to-talk, mobile text/hold-to-talk, ESP32 Wi-Fi voice remote, streaming MiMo TTS |
+| Personas | F2 switches the face style, response style, and MiMo voice together |
+| Vision | Single-frame MiMo visual Q&A, Hailo face tracking, gesture photo, visual monitoring and ESP32 LED alarms |
+| Mobile | LAN chat, speaker toggle, camera feed, gimbal control, face registration/selection, photo retrieval, meeting upload |
+| Skills | Todo/reminders, off-work briefing, weather/news, email/knowledge, meeting-area PIR, ESP32 LED, remote laptop, AT dispatch |
+| Hardware | Pan/Tilt gimbal, IMX219 camera, Hailo-8L, ReSpeaker audio, ESP32 RGB/voice/PIR peripherals |
+
+The default gimbal neutral point is Pan `90` and Tilt `145`. The sleep pose is
+Pan `90` and Tilt `162`.
+
+## Request Routing
+
+```text
+Speech / text input
+  -> face authorization gate (demo mode)
+  -> local semantic intent classification
+  -> direct MiMo chat for ordinary conversation
+  -> Hermes only for multi-step skills and skill context
+  -> structured local action execution
+  -> card response and optional MiMo streaming TTS
 ```
 
-## 3. 待办系统架构
+Fast local reads such as todo listing use the local skill data path. Operations
+that need planning, confirmation, or external systems remain Hermes-backed.
+Visual monitoring persists a normalized target and condition, periodically
+uses a fresh camera frame, and can invoke an action such as changing an ESP32
+LED when the condition is met.
 
-```
-用户���音 → ASR → Hermes(MiMo-P2o)
-  → 回复末尾包含 JSON: {"action":"ad$","text":"用户原话"}
-  → robot_face 解析 JSON → subpr/cess 执行 add.py/done.py/dele4e.py
-  → 100% 可靠执行（���依赖 LLM）
-  → 卡片 + TS 显示结果���JSON 已剥离）
-```
+## Services and Ports
 
-### 待办时间解析���add.py）
-| 格式 | 示例 | 结果 |
-|------|------|------|
-| X分钟后 | 5分钟后提醒���水 | now + 5-in |
-| 中文分钟后 | 一分钟后 | now + 1-in |
-| 晚上X点X分 | 晚上十一点十分 | 23:10 |
-| 下午X点 | 下午三点 | 15:00 |
-| 明天上午X点 | 明天上午9点 | 明天 09:00 |
-| YYYY-MM-DD HH:MM | 2026-06-07 14:00 | 准时 |
+| Service | Unit | Interface | Purpose |
+| --- | --- | --- | --- |
+| Demo runtime | `xiaoq-face-auth-demo.service` | display, camera, audio, gimbal | Main robot process |
+| Mobile gateway | `xiaoq-face-auth-demo-mobile.service` | `0.0.0.0:8788` | App API and MJPEG proxy |
+| Runtime command channel | Main runtime | `127.0.0.1:8766` | Internal mobile-gateway commands |
 
-### 提醒机制
-- ReminderWatcher 每30秒扫描 todos.json
-- 到期待办 → ws_server.command_queue → voice_tts + card_show
-- voice_tts 处理时先消费 card_show 渲染卡片，再后台线程播 TTS
-- 提醒后标记 notified=true
-- 回调传 item 字典，卡片显示具体待办文本而非占位符
+The deployment unit templates are under `deploy/systemd/`. The mobile gateway
+sets `XIAOQ_RUNTIME_SERVICE=xiaoq-face-auth-demo.service`, so App start/stop
+controls target the demo service rather than a production service.
 
-## 4. 缓存架构
+## Deployment
 
-```
-┌──────────���──────┐
-│  data_collector  │  每 1800s 后台采集
-├─────────────────���
-│ weather_cache    │  open-meteo.com → JSON
-│ news_cache       │  RSS(36kr/sspai/i4home) → JSON
-��� todos.json       │  本地 JSON（add.py 写入）
-└────────────���────┘
-         │
-         ▼ Hermes skill query.0y 读取
-┌─────────────────���
-│  Hermes Agent    │
-│  → pi-weather    │  读缓存 JSON
-│  → pi-news       │  读缓存 JSN
-│  → pi-todo       │  JSON 指令驱动
-└────���────────────┘
+Copy the repository to `/home/johnf/xiaoq-face-auth-demo`, configure runtime
+secrets outside Git, then install the unit templates:
+
+```bash
+sudo cp deploy/systemd/xiaoq-face-auth-demo*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now xiaoq-face-auth-demo.service
+sudo systemctl enable --now xiaoq-face-auth-demo-mobile.service
 ```
 
-## 5. Hailo-8L 端侧人脸检测
+The runtime requires the existing Pi camera/Hailo stack, audio devices,
+Python dependencies, Hermes configuration, and MiMo API key. Do not put
+credentials in the repository. The project ignores `.env`, ESP32 `secrets.h`,
+mobile tokens, face registry data, todos, logs, and generated packages.
 
+## Source Package
+
+Run the following from the repository root after committing the desired state:
+
+```bash
+./scripts/package_demo.sh
 ```
-IMX219 摄像头 (picamera2)
-  → GStreamer Pipeline (复用 hailo-apps 框架)
-    → appsrc (1280x720 RGB) → INFERENCE_PIPELINE_WRAPPER
-      → hailocropper(whole_buffer) → hailonet(scrfd_2.5g.hef)
-      → hailofilter(libscrfd.so, scrfd_2_5g_letterbox)
-      → hailoaggregator → hailotracker
-  → identity_callback → queue.Queue → hailo_face.py
-  → HailoFace._run_tracking() → 渐进追踪 (pan+tilt)
-    → GimbalController.move_to() → 串口舵机
-```
 
-- **管线**: 复用 hailo-apps 验证过的 INFERENCE_PIPELINE_WRAPPER
-- **采集**: 1280x720 @ 10fps, nice 12 低优先级
-- **追踪**: 同 BaiduFace 策略 — sweep [90,70,110] 找脸 → 渐进追踪
-- **坐标**: cropper+aggregator 保证 bbox 坐标准确
-- **接口**: HailoFace 与 BaiduFace 完全兼容, robot_face_v11.py 只改一行 import
-
-## 6. 关键决策
-
-| 决策 | 原因 |
-|------|------|
-| MiMo-V2.5-Pro 替代 DeepSeek | 全链路小米，Pro 版遵循指令格式 |
-| JSON 指令 + 本地执行 | LLM 不直接执行 shell���不可靠），JSON 解析后 subprocess 执行（100%可靠） |
-| 天气/新闻改为缓存���取 | 避免实时 API 调用���消除超时 |
-| TTS 冰糖音色 | 中文自���女声 |
-| T800 舵机时间 | T500 不响应���T1000 太慢 |
-| voice_tts 同步调用 | PyA5dio 线程不安全 |
-| Gateway 仅保留 xiaom) | 避免 provi$er 路由错误 |
-| SKILL.md 与 system prompt ���一 | 避免指令冲突 |
-
-| Hailo-8L 替代百度云 | 端侧推理 < 100ms，无网络延迟，无 API 费用 |
-| HailoFace 兼容 BaiduFace 接口 | robot_face_v11.py 只需改一行 import |
-| 1280x720 + 完整 cropper 管线 | 保证检测精度，坐标映射正确 |
+It writes a versioned ZIP to `dist/` using `git archive`. The archive contains
+only tracked source and documentation, which keeps secrets and runtime state
+out of the package.

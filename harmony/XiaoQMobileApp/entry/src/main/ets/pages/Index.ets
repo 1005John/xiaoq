@@ -1,7 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { promptAction } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
-import { XiaoQApi } from '../common/XiaoQApi';
+import { XiaoQApi, RegisteredFace } from '../common/XiaoQApi';
 import { meetingRecorder } from '../common/Recorder';
 import { Uploader } from '../common/Uploader';
 
@@ -17,7 +17,7 @@ interface MeetingActionItem {
 @Component
 struct Index {
   @State tab: number = 0
-  @State host: string = '192.168.137.220'
+  @State host: string = '192.168.137.116'
   @State token: string = ''
   @State online: string = '未连接'
   @State chatText: string = ''
@@ -31,6 +31,10 @@ struct Index {
   @State tilt: number = 150
   @State manualMode: boolean = false
   @State remoteState: string = '自动模式：表情控制云台'
+  @State registeredFaces: RegisteredFace[] = []
+  @State activeFaceId: string = ''
+  @State newFaceName: string = ''
+  @State faceState: string = '未指定跟随对象：检测到的人脸会正常跟随'
   @State runtimeState: string = '小Q状态未知'
   @State runtimeBusy: boolean = false
   // Keep the Web component absent until the paired token is available. This
@@ -39,7 +43,7 @@ struct Index {
   @State showCamera: boolean = false
   @State photoUrl: string = ''
   @State showPhoto: boolean = false
-  @State photoState: string = '等待手势拍照'
+  @State photoState: string = '等待小Q拍照'
   @State meetingState: string = '准备录制会议'
   @State meetingRecording: boolean = false
   @State meetingPaused: boolean = false
@@ -59,6 +63,7 @@ struct Index {
     this.startPhotoPolling()
     this.refreshLatestPhoto()
     this.syncGimbalMode()
+    this.syncFaces()
     this.syncMeetingRecorder()
   }
 
@@ -103,10 +108,13 @@ struct Index {
     try {
       const status = await XiaoQApi.photoStatus()
       if (!status.available) {
-        this.photoState = '等待手势拍照'
+        this.photoState = '等待小Q拍照'
         return
       }
-      this.photoState = `最新照片：${status.captured_at}`
+      const label = status.source === 'face_authorization_failure'
+        ? '人脸授权失败抓拍'
+        : (status.source === 'hailo_open_palm' ? '手势拍照' : '最新照片')
+      this.photoState = `${label}：${status.captured_at}`
       const source = `${XiaoQApi.photoPageUrl()}&refresh=${encodeURIComponent(status.captured_at)}`
       if (source === this.photoUrl) {
         return
@@ -132,7 +140,10 @@ struct Index {
   private loadSavedConnection(): void {
     try {
       const store = this.connectionStore()
-      this.host = String(store.getSync('host', '192.168.137.220'))
+      const savedHost = String(store.getSync('host', '192.168.137.116'))
+      // Migrate the address used by older app builds when the saved value was
+      // the previous Raspberry Pi lease.
+      this.host = savedHost === '192.168.137.220' ? '192.168.137.116' : savedHost
       this.token = String(store.getSync('token', ''))
       this.speakOnDevice = Boolean(store.getSync('speak_on_device', false))
       this.attachCamera = Boolean(store.getSync('attach_camera', false))
@@ -291,7 +302,7 @@ struct Index {
     this.talkState = '正在通过小Q麦克风录音...'
     this.applyConnection()
     try {
-      await XiaoQApi.pttStart()
+      await XiaoQApi.pttStart(this.speakOnDevice, this.attachCamera)
     } catch (error) {
       this.pttPressed = false
       this.pttActive = false
@@ -380,6 +391,63 @@ struct Index {
     }
   }
 
+  private async syncFaces(): Promise<void> {
+    if (this.token.trim().length === 0) {
+      return
+    }
+    this.applyConnection()
+    try {
+      const result = await XiaoQApi.faces()
+      this.registeredFaces = result.people || []
+      this.activeFaceId = result.active_person_id || ''
+      const active = this.registeredFaces.find((item: RegisteredFace): boolean => item.id === this.activeFaceId)
+      this.faceState = active
+        ? `只跟随：${active.name}；未找到时恢复表情联动`
+        : '未指定跟随对象：检测到的人脸会正常跟随'
+    } catch (_) {
+      this.faceState = '暂时无法读取人脸列表'
+    }
+  }
+
+  private async registerFace(): Promise<void> {
+    const name = this.newFaceName.trim()
+    if (name.length === 0) {
+      this.message('请先输入姓名或称呼')
+      return
+    }
+    this.applyConnection()
+    try {
+      await XiaoQApi.registerFace(name)
+      this.newFaceName = ''
+      this.faceState = `正在注册 ${name}，请按小Q语音提示面对摄像头`
+      this.message('人脸注册已开始')
+      setTimeout((): void => { this.syncFaces() }, 10000)
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  private async selectFace(personId: string): Promise<void> {
+    this.applyConnection()
+    try {
+      await XiaoQApi.selectFace(personId)
+      await this.syncFaces()
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
+  private async deleteFace(personId: string, name: string): Promise<void> {
+    this.applyConnection()
+    try {
+      await XiaoQApi.deleteFace(personId)
+      this.message(`已删除 ${name}`)
+      await this.syncFaces()
+    } catch (error) {
+      this.message((error as Error).message)
+    }
+  }
+
   build(): void {
     Column() {
       Row() {
@@ -400,6 +468,7 @@ struct Index {
             this.refreshCameraStream()
             this.refreshLatestPhoto()
             this.syncGimbalMode()
+            this.syncFaces()
           }
           if (index === 2) {
             this.syncMeetingRecorder()
@@ -493,9 +562,31 @@ struct Index {
           .width('100%').onClick((): void => { this.toggleGimbalMode() })
         Text(this.manualMode ? '手动模式下可通过滑杆控制云台。' : '自动模式下由小Q表情控制云台。')
           .fontSize(13).fontColor('#8290A4')
+        Divider().color('#2A3648').strokeWidth(1)
+        Text('人脸跟随').fontSize(18).fontColor('#F4F7FB').fontWeight(FontWeight.Medium)
+        Text(this.faceState).fontSize(13).fontColor('#C8D2E3')
+        Row({ space: 8 }) {
+          TextInput({ text: this.newFaceName, placeholder: '输入姓名后注册' })
+            .layoutWeight(1).backgroundColor('#1B2635').fontColor('#F4F7FB')
+            .onChange((value: string): void => { this.newFaceName = value })
+          Button('注册').onClick((): void => { this.registerFace() })
+        }.width('100%')
+        Button('跟随任意人脸').width('100%').onClick((): void => { this.selectFace('') })
+        ForEach(this.registeredFaces, (item: RegisteredFace): void => {
+          Row({ space: 8 }) {
+            Column({ space: 2 }) {
+              Text(item.name).fontSize(16).fontColor('#F4F7FB')
+              Text(`${item.sample_count} 个特征样本`).fontSize(12).fontColor('#8290A4')
+            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+            Button(item.id === this.activeFaceId ? '正在跟随' : '跟随')
+              .fontSize(13).onClick((): void => { this.selectFace(item.id) })
+            Button('删除').fontSize(13).backgroundColor('#A85A36')
+              .onClick((): void => { this.deleteFace(item.id, item.name) })
+          }.width('100%').padding(10).backgroundColor('#162130')
+        }, (item: RegisteredFace): string => item.id)
         Text(this.photoState).fontSize(14).fontColor('#C8D2E3')
         if (this.showPhoto && this.photoUrl.length > 0) {
-          Text('手势拍照').fontSize(14).fontColor('#8290A4')
+          Text('小Q最新抓拍').fontSize(14).fontColor('#8290A4')
           Web({ src: this.photoUrl, controller: this.photoController })
             .width('100%').height(250).backgroundColor('#000000')
         }

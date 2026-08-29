@@ -9,11 +9,13 @@ from .email_knowledge import EmailKnowledgeSkill
 from .wechat_knowledge import WechatKnowledgeSkill
 from .esp32_led import Esp32LedSkill
 from .remote_laptop import RemoteLaptopSkill
+from .vision_monitor import VisionMonitorSkill
+from .off_work import OffWorkSkill
 
 __all__ = [
     "Skill", "SkillManager", "SkillResult", "SideEffect",
     "TodoSkill", "WeatherSkill", "NewsSkill", "RelaxSkill", "BgmSkill",
     "IngestSkill",
     "EmailKnowledgeSkill", "WechatKnowledgeSkill",
-    "Esp32LedSkill", "RemoteLaptopSkill",
+    "Esp32LedSkill", "RemoteLaptopSkill", "VisionMonitorSkill", "OffWorkSkill",
 ]

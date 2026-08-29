@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """标记待办完成"""
-import json, sys
+import json, sys, os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-TODOS_FILE = Path.home() / "xiaoq" / "data" / "todos.json"
+TODOS_FILE = Path(os.environ.get("XIAOQ_ROOT", Path(__file__).resolve().parents[1])) / "data" / "todos.json"
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -24,7 +25,8 @@ if __name__ == "__main__":
     if 0 <= idx < len(active):
         target = active[idx]
         target['done'] = True
+        target['completed_at'] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         TODOS_FILE.write_text(json.dumps(todos, ensure_ascii=False, indent=2))
-        print(f"已完成: {target.get('text', '')}")
+        print(f"已完成: {target.get('text') or target.get('title') or '待办事项'}")
     else:
         print(f"没有第{idx+1}项待办")

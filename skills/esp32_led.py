@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
@@ -82,7 +83,40 @@ class Esp32LedSkill(Skill):
             "url": str(device.get("url") or legacy.get("url") or os.environ.get("XIAOQ_ESP32_LED_URL") or DEFAULT_URL).rstrip("/"),
             "fallback_url": str(device.get("fallback_url") or "").rstrip("/"),
             "token": str(device.get("token") or legacy.get("token") or os.environ.get("XIAOQ_ESP32_LED_TOKEN") or ""),
+            "registry_path": str(registry_path),
         }
+
+    @staticmethod
+    def _resolved_ip(endpoint: str) -> str:
+        """Resolve the endpoint host without trusting an old DHCP address."""
+        host = urllib.parse.urlparse(endpoint).hostname
+        if not host:
+            return ""
+        try:
+            return socket.gethostbyname(host)
+        except OSError:
+            return ""
+
+    def _record_resolved_address(self, config: dict[str, str], endpoint: str) -> str:
+        """Persist the current mDNS/DNS result after an authenticated success."""
+        address = self._resolved_ip(endpoint)
+        if not address:
+            return ""
+        registry_path = Path(config["registry_path"])
+        registry = self._read_config(registry_path)
+        devices = registry.get("devices", {})
+        device = devices.get(config["id"]) if isinstance(devices, dict) else None
+        if not isinstance(device, dict):
+            return address
+        if device.get("ip") == address and device.get("fallback_url") == f"http://{address}":
+            return address
+        device["ip"] = address
+        device["fallback_url"] = f"http://{address}"
+        device["last_resolved_at"] = datetime.now(timezone.utc).isoformat()
+        temporary = registry_path.with_suffix(registry_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, registry_path)
+        return address
 
     def execute(self, params: dict = None) -> SkillResult:
         params = params or {}
@@ -108,6 +142,7 @@ class Esp32LedSkill(Skill):
         endpoints = [config["url"]]
         if config["fallback_url"] and config["fallback_url"] != config["url"]:
             endpoints.append(config["fallback_url"])
+        successful_endpoint = ""
         for endpoint in endpoints:
             url = f"{endpoint}/api/led?{urllib.parse.urlencode({'color': color})}"
             request = urllib.request.Request(url, data=b"", method="POST", headers={
@@ -116,6 +151,7 @@ class Esp32LedSkill(Skill):
             try:
                 with urllib.request.urlopen(request, timeout=5) as response:
                     result = json.loads(response.read().decode("utf-8"))
+                successful_endpoint = endpoint
                 break
             except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
                 errors.append(str(exc))
@@ -124,11 +160,12 @@ class Esp32LedSkill(Skill):
         if not result.get("ok"):
             return SkillResult(success=False, error=str(result.get("error", "ESP32 LED rejected request")))
         target = config["name"]
+        resolved_ip = self._record_resolved_address(config, successful_endpoint)
         self._record_color(device_id, target, color)
         spoken = f"已关闭{target}灯光" if color == "off" else f"已把{target}调成{self._color_name(color)}"
         return SkillResult(
             success=True,
-            data={"device_id": device_id, "device_name": target, "color": color},
+            data={"device_id": device_id, "device_name": target, "color": color, "ip": resolved_ip},
             side_effects=[SideEffect("voice_tts", {"text": spoken})],
         )
 
