@@ -1,0 +1,19 @@
+[Unit]
+Description=XiaoQ Mobile Control LAN API
+After=network.target xiaoq-face-auth-demo.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/xiaoq-face-auth-demo
+Environment=PYTHONPATH=/home/pi/xiaoq-face-auth-demo:/home/pi/hailo-apps
+Environment=DISPLAY=:0
+Environment=XIAOQ_ROOT=/home/pi/xiaoq-face-auth-demo
+ExecStartPre=/bin/sleep 8
+ExecStart=/usr/bin/python3 /home/pi/xiaoq-face-auth-demo/mobile_control.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

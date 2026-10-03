@@ -1,0 +1,25 @@
+[Unit]
+Description=XiaoQ face authorization demo runtime
+After=graphical.target
+
+[Service]
+Type=simple
+User=pi
+ExecStartPre=/bin/sleep 5
+ExecStart=/home/pi/xiaoq-face-auth-demo/start_xiaoq.sh
+Restart=on-failure
+RestartSec=10
+Environment=DISPLAY=:0
+Environment=AIOT_API_KEY=tok_3Bgj8JoAIJEEHDMyh2eZzBUwxNpIQ4g5OBBQzciD
+Environment=AIOT_BASE_URL=https://onerouter.cmaiot.cn/v1
+Environment=AIOT_LLM_MODEL=Auto
+Environment=AIOT_ASR_MODEL=TS/SenseVoiceSmall
+Environment=TYPESAFE_API_KEY=apikey_2179cde0d02c344b43caa28d175161cbe9ae_e82cb551a98da7b100e8f90976038d08ba6053b6f02e2df56631d764dcbdea71
+Environment=KB_DB_HOST=192.168.137.1
+Environment=KB_DB_USER=kb_reader
+Environment=KB_DB_PASS=ModuleKbV02_20260714
+Environment=KB_DB_NAME=module_test_kb_v02
+
+[Install]
+WantedBy=graphical.target
+

@@ -1,0 +1,16 @@
+[Unit]
+Description=MobileWork Agent
+After=graphical.target
+
+[Service]
+Type=simple
+User=pi
+Environment=DISPLAY=:0
+ExecStartPre=/bin/sleep 10
+ExecStart=/opt/MobileWork/mobilework --no-sandbox
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical.target
+

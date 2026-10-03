@@ -1,0 +1,14 @@
+[Unit]
+Description=MW Agent Gateway (port 9800)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/usr/bin/python3 /home/pi/mw_gateway.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
