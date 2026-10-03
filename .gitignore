@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ﻿__pycache__/
 *.pyc
 *.pyo
@@ -7,3 +8,21 @@ data/
 *.wav
 *.log
 .env
+=======
+__pycache__/
+*.pyc
+*.pyo
+logs/
+dist/
+*.log
+data/*_cache.json
+.env
+*.swp
+.DS_Store
+data/todos.json
+*.bak
+*.bak_*
+esp32/xiaoq_led_controller/secrets.h
+esp32/xiaoq_audio_ptt/secrets.h
+data/esp32_devices.json
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52

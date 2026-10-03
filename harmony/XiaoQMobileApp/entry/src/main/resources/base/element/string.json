@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "小Q手机控制模块" },
+    { "name": "EntryAbility_desc", "value": "小Q手机控制" },
+    { "name": "EntryAbility_label", "value": "小Q遥控" },
+    { "name": "microphone_permission_reason", "value": "用于录制语音并发送给小Q" }
+  ]
+}

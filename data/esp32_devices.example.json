@@ -1,0 +1,17 @@
+{
+  "devices": {
+    "1": {
+      "name": "1号ESP32",
+      "url": "http://xiaoq-led-1.local",
+      "fallback_url": "http://192.168.137.33",
+      "token": "replace-with-device-1-token",
+      "visual_labels": ["ESP32-1", "1号ESP32"]
+    },
+    "2": {
+      "name": "2号ESP32",
+      "url": "http://xiaoq-led-2.local",
+      "token": "replace-with-device-2-token",
+      "visual_labels": ["ESP32-2", "2号ESP32"]
+    }
+  }
+}

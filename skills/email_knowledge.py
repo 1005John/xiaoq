@@ -20,10 +20,17 @@ from skills.base import Skill, SkillResult, SideEffect
 
 log = logging.getLogger("skills.email_knowledge")
 
+<<<<<<< HEAD
 QUERY_SCRIPT = "/home/pi/.hermes/skills/email/email-knowledge/query.py"
 QUERY_TIMEOUT = 25
 LLM_CONFIG_FILE = Path(QUERY_SCRIPT).parent / "config" / "llm.json"
 EMAIL_CONTEXT_FILE = Path("/home/pi/xiaoq/data/email_context.json")
+=======
+QUERY_SCRIPT = "/home/johnf/.hermes/skills/email/email-knowledge/query.py"
+QUERY_TIMEOUT = 25
+LLM_CONFIG_FILE = Path(QUERY_SCRIPT).parent / "config" / "llm.json"
+EMAIL_CONTEXT_FILE = Path("/home/johnf/xiaoq/data/email_context.json")
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
 EMAIL_CONTEXT_TTL_SECONDS = 30 * 60
 
 
@@ -226,6 +233,7 @@ class EmailKnowledgeSkill(Skill):
             except (OSError, sqlite3.Error) as exc:
                 log.warning("recent email lookup failed: %s", exc)
 
+<<<<<<< HEAD
             # If date query found 0 rows, return 'no emails' instead of falling to FTS
             if target_day:
                 period = f"{target_day.month}月{target_day.day}日"
@@ -242,6 +250,8 @@ class EmailKnowledgeSkill(Skill):
                     ],
                 )
 
+=======
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
         # 清理查询文本（产品名扩展已在 query.py 中处理）
         query = re.sub(
             r"查查|查一下|查看|查询一下|帮我|搜一下|翻一下|看看|找找|邮件|发的|关于|[，。！？、；：.,!?;:（）【】《》]",

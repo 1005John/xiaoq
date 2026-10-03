@@ -87,9 +87,12 @@ class HailoFace:
 
     def stop(self):
         self.running = False
-        if self._pipeline:
-            self._pipeline.stop()
-            self._pipeline = None
+        try:
+            if self._pipeline:
+                self._pipeline.stop()
+        except Exception as e:
+            print(f"[HailoFace] stop error: {e}", flush=True)
+        self._pipeline = None
         self.face_detected = False
         self.following_target = False
         self._locked_track_id = None

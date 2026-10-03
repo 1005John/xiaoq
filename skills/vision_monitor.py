@@ -340,6 +340,7 @@ class VisionMonitorService:
 
     def _dispatch_alarm(self, task_id: str, task: dict) -> bool:
         try:
+<<<<<<< HEAD
             task.update({
                 "triggered": True, "active": False, "status": "completed", "alarm_pending": False,
                 "alarm_result": "已语音播报报警并显示卡片", "triggered_at": _now(), "completed_at": _now(),
@@ -347,14 +348,33 @@ class VisionMonitorService:
             with self._lock:
                 self._put_task(task_id, task)
             print(f"[VISION-MONITOR] task={task_id} alarm raised: voice + card")
+=======
+            result = Esp32LedSkill().execute({"device_id": task["alarm_device_id"], "color": task["alarm_color"]})
+            if not result.success:
+                raise RuntimeError(result.error or "ESP32 报警灯执行失败")
+            task.update({
+                "triggered": True, "active": False, "status": "completed", "alarm_pending": False,
+                "alarm_result": "报警灯已执行", "alarm_ip": str(result.data.get("ip", "")), "triggered_at": _now(), "completed_at": _now(),
+            })
+            with self._lock:
+                self._put_task(task_id, task)
+            print(f"[VISION-MONITOR] task={task_id} alarm LED succeeded ip={task.get('alarm_ip')}")
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
             if self._alert_callback:
                 self._alert_callback(f"监控报警：{task['condition']}。{task.get('last_observation') or '已确认触发条件。'}", task)
             return True
         except Exception as error:
+<<<<<<< HEAD
             task.update({"alarm_pending": True, "alarm_result": f"报警失败: {str(error)[:240]}", "last_error": f"报警失败: {str(error)[:240]}"})
             with self._lock:
                 self._put_task(task_id, task)
             print(f"[VISION-MONITOR] task={task_id} alarm failed: {error}")
+=======
+            task.update({"alarm_pending": True, "alarm_result": f"报警灯执行失败: {str(error)[:240]}", "last_error": f"报警灯执行失败: {str(error)[:240]}"})
+            with self._lock:
+                self._put_task(task_id, task)
+            print(f"[VISION-MONITOR] task={task_id} alarm LED failed: {error}")
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
             return False
 
     def _run_task(self, task_id: str, stop_event: threading.Event) -> None:
@@ -389,7 +409,11 @@ class VisionMonitorService:
 
 class VisionMonitorSkill(Skill):
     name = "vision_monitor"
+<<<<<<< HEAD
     description = "按自然语言任务持续观察摄像头画面并在条件满足时语音报警并显示卡片"
+=======
+    description = "按自然语言任务持续观察摄像头画面并在条件满足时触发报警灯"
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
 
     def __init__(self, service: VisionMonitorService):
         super().__init__()
@@ -418,7 +442,11 @@ class VisionMonitorSkill(Skill):
         ok, text, task = self.service.start(config)
         if not ok:
             return SkillResult(success=True, data=task, side_effects=[SideEffect("voice_tts", {"text": text})])
+<<<<<<< HEAD
         spoken = f"已开始{task['display_id']}监控：每{task['interval_seconds']}秒检查{task['target']}；{task['condition']}时语音报警并显示卡片。"
+=======
+        spoken = f"已开始{task['display_id']}监控：每{task['interval_seconds']}秒检查{task['target']}；{task['condition']}时让{task['alarm_device_id']}号ESP32变成{self._color_name(task['alarm_color'])}。"
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
         return SkillResult(success=True, data=task, side_effects=[SideEffect("card_show", {"title": "视觉监控", "lines": [f"任务：{task['display_id']}", f"目标：{task['target']}", f"条件：{task['condition']}", f"间隔：{task['interval_seconds']}秒"], "card_type": "todo"}), SideEffect("voice_tts", {"text": spoken})])
 
     @staticmethod

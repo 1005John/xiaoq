@@ -15,7 +15,11 @@ from skills.base import Skill, SkillResult, SideEffect
 
 log = logging.getLogger("skills.wechat_knowledge")
 
+<<<<<<< HEAD
 QUERY_SCRIPT = "/home/pi/.hermes/skills/wechat/wechat-knowledge/query.py"
+=======
+QUERY_SCRIPT = "/home/johnf/.hermes/skills/wechat/wechat-knowledge/query.py"
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
 QUERY_TIMEOUT = 25
 
 

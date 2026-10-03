@@ -337,10 +337,16 @@ class HailoFacePipeline:
 
     def stop(self):
         self._running = False
-        if self._app and self._app.loop:
-            self._app.loop.quit()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
+        try:
+            if self._app and self._app.loop:
+                self._app.loop.quit()
+        except:
+            pass
+        try:
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=2)
+        except:
+            pass
 
     def pause(self):
         """Pause the GStreamer pipeline (PAUSED state). HEF models stay loaded."""

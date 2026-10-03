@@ -1,0 +1,3 @@
+# Permit XiaoQ's service account (member of plugdev) to access only N6705B USBTMC devices.
+SUBSYSTEM=="usb", ATTR{idVendor}=="0957", ATTR{idProduct}=="0f07", MODE="0660", GROUP="plugdev"
+KERNEL=="usbtmc[0-9]*", ATTRS{idVendor}=="0957", ATTRS{idProduct}=="0f07", MODE="0660", GROUP="plugdev"

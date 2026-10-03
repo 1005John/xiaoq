@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>敲木鱼 — 放松一下</title>
+<style>
+body { margin:0; display:flex; justify-content:center; align-items:center;
+       min-height:100vh; background:#1a1a2e; color:#e0e0e0;
+       font-family: system-ui, sans-serif; flex-direction:column; }
+.fish { width:120px; height:120px; border-radius:50%; background:#8B4513;
+        display:flex; align-items:center; justify-content:center;
+        font-size:48px; cursor:pointer; transition: transform 0.1s;
+        box-shadow: 0 4px 20px rgba(139,69,19,0.4); user-select:none; }
+.fish:active { transform: scale(0.9); }
+.counter { font-size:24px; margin-top:20px; color:#ffa500; }
+.hint { font-size:14px; margin-top:10px; color:#888; }
+.particle { position:fixed; pointer-events:none; animation: float 1.5s ease-out forwards;
+            font-size:18px; }
+@keyframes float { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-80px)} }
+</style>
+</head>
+<body>
+<div class="fish" id="fish" onclick="knock()">&#129424;</div>
+<div class="counter">功德: <span id="cnt">0</span></div>
+<div class="hint">点击木鱼积累功德 &#128591;</div>
+<script>
+let cnt = 0;
+function knock() {
+  cnt++;
+  document.getElementById('cnt').textContent = cnt;
+  const p = document.createElement('div');
+  p.className = 'particle';
+  p.textContent = '&#10024;';
+  p.style.left = (Math.random()*60+20) + '%';
+  p.style.top = '40%';
+  document.body.appendChild(p);
+  setTimeout(() => p.remove(), 1500);
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 800 + Math.random()*200;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(); osc.stop(ctx.currentTime + 0.3);
+  } catch(e) {}
+}
+</script>
+</body>
+</html>

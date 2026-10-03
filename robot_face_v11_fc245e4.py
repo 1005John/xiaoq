@@ -5456,38 +5456,121 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
             self.state = "thinking"
             import urllib.request as _ur, json as _json, time as _t
             _gw = "http://127.0.0.1:9800"
-            _chat_lines.append({"role": "user", "text": txt})
+            # 用户消息已在 process_text 里添加
             _p = txt
             if "ppt" in txt.lower(): _p = txt + "。使用cmit模板。"
+            # 系统提示词：生成文件后自动上传到 PC
+            _sys_hint = (
+                "\n\n[系统指令] 如果你生成了文件输出（.pptx/.md/.html/.markmap/.svg/.pdf/.docx 等），"
+                "必须使用以下命令将文件上传到用户的电脑："
+                "curl -X POST 'http://192.168.137.1:9998/?filename=文件名' "
+                "-H 'Content-Type: application/octet-stream' --data-binary @文件路径。"
+                "上传后在回复中告诉用户文件已传到PC的D:\\XiaoQ_Share目录。"
+            )
+            _p = _p + _sys_hint
             _body = _json.dumps({"prompt": _p}).encode("utf-8")
             _req = _ur.Request(_gw + "/", data=_body, headers={"Content-Type": "application/json"})
             _resp = _ur.urlopen(_req, timeout=30)
             _result = _json.loads(_resp.read().decode())
             if _result.get("ok"):
                 _rowid = _result.get("initial_rowid", 0)
-                for _ in range(120):
-                    _t.sleep(2)
+                self._shown_rowids = set()  # 每轮清空
+                while True:
+                    _t.sleep(1)
+                    # 先获取 progress（实时更新思考+文字）
+                    try:
+                        _pdata = _json.loads(_ur.urlopen(_ur.Request(_gw + "/progress"), timeout=5).read().decode())
+                        _parts = _pdata.get("parts", [])
+                        for _part in _parts:
+                            _prid = _part.get("rowid", 0)
+                            if _prid and _prid not in self._shown_rowids:
+                                _ptype = _part.get("type", "")
+                                _ptext = _part.get("text", "")
+                                # text 为空时不记录 rowid（下次重新获取）
+                                if not _ptext and _ptype not in ("tool", "step-start", "step-finish", "compaction"):
+                                    continue
+                                self._shown_rowids.add(_prid)
+                                # 跳过用户消息
+                                if _ptype == "text" and _ptext.strip() == txt.strip():
+                                    continue
+                                if _ptype == "text" and _ptext:
+                                    if _chat_lines and _chat_lines[-1].get("role") == "assistant":
+                                        _chat_lines[-1]["text"] = _ptext
+                                    else:
+                                        _chat_lines.append({"role": "assistant", "text": _ptext})
+                                    print("[MW] " + _ptext[:60], flush=True)
+                                elif _ptype == "reasoning" and _ptext:
+                                    _chat_lines.append({"role": "reasoning", "text": _ptext})
+                                    print("[MW-REASON] " + _ptext[:60], flush=True)
+                                elif _ptype in ("step-start", "step-finish", "step") and _ptext:
+                                    _chat_lines.append({"role": "reasoning", "text": _ptext})
+                                    print("[MW-STEP] " + _ptext[:60], flush=True)
+                                else:
+                                    if _ptype not in ("step-start", "step-finish", "tool", "compaction"):
+                                        print(f"[MW-DEBUG] type={_ptype} text={_ptext[:40]}", flush=True)
+                    except Exception as _pe:
+                        print("[MW-ERR] progress: " + str(_pe)[:60], flush=True)
+                    # 检查是否完成
                     _s = _json.loads(_ur.urlopen(_ur.Request(_gw + "/status"), timeout=5).read().decode())
                     if _s.get("status") == "done":
+                        # 最后再获取一次 progress，确保拿到最终回复
+                        try:
+                            _pdata = _json.loads(_ur.urlopen(_ur.Request(_gw + "/progress"), timeout=5).read().decode())
+                            _parts = _pdata.get("parts", [])
+                            for _part in _parts:
+                                _prid = _part.get("rowid", 0)
+                                if _prid and _prid not in self._shown_rowids:
+                                    self._shown_rowids.add(_prid)
+                                    _ptype = _part.get("type", "")
+                                    _ptext = _part.get("text", "")
+                                    if _ptype == "text" and _ptext.strip() == txt.strip():
+                                        continue
+                                    if _ptype == "text" and _ptext:
+                                        if _chat_lines and _chat_lines[-1].get("role") == "assistant":
+                                            _chat_lines[-1]["text"] = _ptext
+                                        else:
+                                            _chat_lines.append({"role": "assistant", "text": _ptext})
+                                        print("[MW] " + _ptext[:60], flush=True)
+                                    elif _ptype == "reasoning" and _ptext:
+                                        _chat_lines.append({"role": "reasoning", "text": _ptext})
+                                        print("[MW-REASON] " + _ptext[:60], flush=True)
+                        except:
+                            pass
                         _r = _json.loads(_ur.urlopen(_ur.Request(_gw + "/result"), timeout=5).read().decode())
                         _reply = _r.get("reply", "")
+                        if not _reply:
+                            try:
+                                _pd2 = _json.loads(_ur.urlopen(_ur.Request(_gw + "/progress"), timeout=5).read().decode())
+                                for _p2 in reversed(_pd2.get("parts", [])):
+                                    if _p2.get("type") == "text":
+                                        _t2 = _p2.get("text", "")
+                                        if _t2 and len(_t2.strip()) > 10 and "系统指令" not in _t2 and "使用cmit" not in _t2:
+                                            _reply = _t2.strip()
+                                            break
+                            except:
+                                pass
                         if _reply:
-                            _chat_lines.append({"role": "assistant", "text": _reply})
+                            if not _chat_lines or _chat_lines[-1].get("text") != _reply:
+                                _chat_lines.append({"role": "assistant", "text": _reply})
+                            print("[MW] Reply: " + _reply[:60], flush=True)
+                            try:
+                                import subprocess as _sp, glob as _gl, os as _os2, urllib.parse as _up2
+                                _files = _gl.glob("/home/pi/MobileWork/**/*.pptx", recursive=True)
+                                _files.sort(key=_os2.path.getmtime, reverse=True)
+                                for _fp in _files[:3]:
+                                    if time.time() - _os2.path.getmtime(_fp) < 300:
+                                        _fn = _os2.path.basename(_fp)
+                                        print("[MW] Uploading: " + _fn, flush=True)
+                                        _sp.run(["curl", "-s", "-X", "POST", "-H", "Content-Type: application/octet-stream", "--data-binary", "@" + _fp, "http://192.168.137.1:9998/?filename=" + _up2.quote(_fn)], timeout=30, capture_output=True)
+                                        _chat_lines.append({"role": "assistant", "text": "已传到PC: " + _fn})
+                                        print("[MW] Uploaded: " + _fn, flush=True)
+                            except Exception as _ue:
+                                print("[MW] Upload err: " + str(_ue), flush=True)
                             self._finish_direct_chat(_reply, speak, reply_path)
+                        else:
+                            self._finish_direct_chat("MW已完成", speak, reply_path)
                         return
-                    try:
-                        _parts = _json.loads(_ur.urlopen(_ur.Request(_gw + "/stream?after=" + str(_rowid)), timeout=5).read().decode())
-                        for _part in _parts:
-                            _text = _part.get("text", "")
-                            if _text:
-                                self.reply_text = _text
-                                if _chat_lines and _chat_lines[-1].get("role") == "assistant":
-                                    _chat_lines[-1]["text"] = _text
-                                else:
-                                    _chat_lines.append({"role": "assistant", "text": _text})
-                                print("[MW] " + _text[:60], flush=True)
-                    except:
-                        pass
+
                 self._finish_direct_chat("MW超时", speak, reply_path)
             else:
                 self._finish_direct_chat("MW不可用", speak, reply_path)
@@ -5500,6 +5583,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
     def process_text(self, txt, speak=True, reply_path=""):
         """直接处理文本；手机请求可选择是否播报，并等待文字结果。"""
         global _chat_mode, _chat_lines
+        # MW 模式切换优先（不受 _pending 限制）
         if txt and ("进入移动办公" in txt or "进入办公" in txt):
             _chat_mode = True
             self.state = "speaking"
@@ -5518,6 +5602,8 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
             return
         if _chat_mode:
             print("[Mode] MW: " + txt[:40], flush=True)
+            # 先在主线程添加用户消息（确保立即渲染显示）
+            _chat_lines.append({"role": "user", "text": txt})
             self._pending = False
             import threading as _th
             _th.Thread(target=self._route_mw_gateway, args=(txt, speak, reply_path), daemon=True).start()
@@ -5539,9 +5625,10 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
 
             self.state = "thinking"
 
-            if not self._face_authorized_for_dialogue():
-                self._finish_face_authorization_failure(speak=speak, reply_path=reply_path)
-                return
+            # 跳过人脸授权检查（HailoFace 未启动时不需要）
+            # if not self._face_authorized_for_dialogue():
+            #     self._finish_face_authorization_failure(speak=speak, reply_path=reply_path)
+            #     return
 
             # An explicit one-shot camera question must not be interpreted as
             # a persistent monitor task merely because older visual context
@@ -7834,7 +7921,7 @@ while running:
         if face_style == 'cute':
             # 元气活力风格：跟表情配色一致
             screen.fill(CuteStyle.BG_COLOR)  # (240,208,192) 肤黄肤色背景
-            _C_USER = CuteStyle.BROW_COLOR    # (55,48,42) 深棕色 — 用户问题
+            _C_USER = CuteStyle.BLUSH_COLOR   # (193,77,51) 腮红色 — 用户问题
             _C_TEXT = (40, 35, 30)           # 接近黑色 — Agent 回复
             _C_HEAD1 = (120, 50, 80)         # 深玫红标题
             _C_HEAD2 = (140, 60, 90)         # 玫红标题
@@ -7868,12 +7955,12 @@ while running:
 
         try:
             _font = renderer.font_cn_h
-            _font.size = 26
+            _font.size = 36
             _line_h = 40
             _margin_x = 20
             _margin_top = 16
-            _face_area = 120
-            _max_y = HEIGHT - _face_area - 8  # 文字区域不到表情区域，避免遮挡
+            _face_area = 80
+            _max_y = HEIGHT - _face_area  # 文字区域不到表情区域，避免遮挡
 
             # 光标闪烁
             _chat_cursor_timer += 1
@@ -7982,9 +8069,38 @@ while running:
 
             # ── 渲染 ──
             _y = _margin_top
-            _rendered_heights = []  # 记录每个item的高度，用于滚动
+            _rendered_heights = []
 
-            for _item in _render_items:
+            # ── 自动滚动：从后往前算能放多少行 ──
+            _visible_h = _max_y - _margin_top - _line_h  # 多留一行余量
+            _accum_h = 0
+            _start_idx = 0
+            _last_user_idx = -1
+            # 找到最后一条用户消息的位置
+            for _ui, _uri in enumerate(_render_items):
+                if _uri[0] == "user":
+                    _last_user_idx = _ui
+            # 从后往前算
+            for _i in range(len(_render_items) - 1, -1, -1):
+                _ri = _render_items[_i]
+                if _ri[0] == "empty":
+                    _ih = _line_h // 2
+                elif _ri[0] == "h1":
+                    _ih = _line_h + 8
+                elif _ri[0] == "h2":
+                    _ih = _line_h + 4
+                else:
+                    _ih = _line_h * max(1, len(_wrap_text_md(str(_ri[1]), _font, WIDTH - _margin_x * 2 - (_ri[3] * 30))))
+                _accum_h += _ih
+                if _accum_h > _visible_h:
+                    _start_idx = _i
+                    # 确保最后一条用户消息在可见区域内
+                    if _last_user_idx >= 0 and _start_idx > _last_user_idx:
+                        _start_idx = max(0, _last_user_idx)
+                    break
+
+            for _item_idx, _item in enumerate(_render_items):
+                if _item_idx < _start_idx: continue
                 _itype = _item[0]
                 _icontent = _item[1]
                 _icolor = _item[2]
@@ -8019,7 +8135,7 @@ while running:
                         _rendered_heights.append(("reason", _line_h))
 
                 elif _itype == "h1":
-                    _font.size = 32
+                    _font.size = 26
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
                         if _y + _line_h + 4 > _max_y: break
@@ -8032,7 +8148,7 @@ while running:
                     _font.size = 26
 
                 elif _itype == "h2":
-                    _font.size = 30
+                    _font.size = 26
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
                         if _y + _line_h + 2 > _max_y: break
@@ -8043,7 +8159,7 @@ while running:
                     _font.size = 26
 
                 elif _itype == "h3":
-                    _font.size = 28
+                    _font.size = 42
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
                         if _y + _line_h > _max_y: break

@@ -1,0 +1,8 @@
+.signing/
+.sdk/
+.idea/
+.hvigor/
+local.properties
+build-profile.json5
+entry/build/
+build/

@@ -1,0 +1,7 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "xiaoq-mobile",
+  "version": "1.0.0",
+  "description": "XiaoQ HarmonyOS companion app",
+  "dependencies": {}
+}

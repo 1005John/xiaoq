@@ -1,0 +1,226 @@
+# 变更日志
+
+## [v2.0.0-demo] - 2026-08-29
+
+### Demo 集成
+- 新增独立的人脸授权演示版：仅当手机 App 选定且已注册的人脸被 Hailo ArcFace 识别后，才允许语音、文字、视觉和 ESP32 对讲请求。
+- 授权失败时统一回复“人脸授权失败”，并自动抓拍一张当前照片供手机 App 查看。
+- 新增手机端人脸注册、已注册人脸选择与删除接口；Hailo 人脸跟踪可持续搜索指定人脸。
+- 新增 demo 专用 systemd 主服务和手机网关服务，均支持开机自启，手机端启动/停止控制会指向 demo 服务。
+
+### 交互与硬件
+- 云台启动、唤醒、人脸追踪和手机控制的默认中性位置统一为 Pan 90 / Tilt 145；休眠姿势保持 Tilt 162。
+- 增加 ESP32 Wi-Fi 语音遥控、RGB 状态灯、I2S 录音和回复音频播放代码，以及 PIR 会议区检测技能。
+- 增加视觉监控任务：可记住视觉问答中的目标，按指定间隔观察，在条件满足时调用 ESP32 LED 报警；支持查询和关闭任务。
+
+### 办公与移动能力
+- 手机对讲支持按住说话、扬声器播报开关、视觉问答、云台控制、实时音量调节、远程启动/关闭小Q。
+- 会议录音支持手机上传、后台纪要生成和从普通“待办事项”标题/编号列表提取待办。
+- 新增下班待办总结提醒、会议区无人监控提醒，并优化待办本地查询路由。
+
+## [v1.7.0] - 2026-07-26
+
+### ✨ 会议录音与纪要
+- 新增局域网会议录音上传服务（端口 8787），支持上传后自动通知小Q开始处理。
+- 会议录音可从小Q本地收件箱读取，生成 MD、HTML、PDF 并归档原录音。
+- 支持查询最新会议纪要的讨论内容、结论和待办；查询只依据会议纪要，不再误走邮件知识库。
+
+### 🧠 模型与知识库
+- 小Q聊天、邮件汇总、会议纪要统一使用 MiMo，修复 MiMo 被错误归一化为 DeepSeek 的问题。
+- 邮件知识库更新范围调整为最近 7 天，并将处理超时扩展到 15 分钟；失败时给出明确提示。
+
+### 🎤 交互与声音
+- TTS 播放改用 ReSpeaker 固定声卡名称，避免设备编号变化导致无声。
+- 回复卡片仅在「TTS 播放完成后等待 5 秒」和「内容滚动到底部后等待 5 秒」两个条件都满足时关闭。
+
+## [v1.6.0] - 2026-06-14
+
+### ✨ 新技能
+- **市场调研报告**：读取 shared/input/ 资料，生成 MD+HTML+PDF 报告到 output/
+- **会议纪要**：读取 shared/input/ 录音（m4a/mp3/wav），MiMo ASR 转写 → DeepSeek 生成纪要
+- **音量控制**：语音调节 ReSpeaker 音量（支持"百分之二十五"/"调到30%"/"音量多少"）
+- **共享文件夹 SSH 基础设施**：Pi → Mac mini 密钥认证，~shared/ 文件夹读写
+
+### 🎨 面部调整
+- 可爱风格眉毛往中间伸长 35%
+
+### 🔧 语音优化
+- TTS 改为官方 OpenAI 客户端流式（低延迟）
+- 恢复标准 TTS 模型（霓虹=冰糖，可爱=苏打）
+
+### 🐛 修复
+- SSH 文件列表空格导致文件名解析错误（ls -la → ls -1）
+- 变量名 `_b64` 覆盖 base64 模块导致 AttributeError
+- 音量查询正则匹配到 Limits 值（Playback 0）
+- 中文数字"百分之二十五"音量识别
+- ASR 内层 except:pass 静默吞错误
+- 卡片默认 dialog 样式统一为 todo
+- 重启进程清理（kill -9 替代 pkill）
+
+### 🧠 架构调整
+- 邮件技能改为 Hermes CLI + pi-email 技能处理
+- Little_Q_new 依赖完全移除，项目独立无依赖
+- timeout 30s → 300s, max_tokens 300 → 4096
+
+## [v1.5.3] - 2026-06-13
+
+### 🔧 提醒系统修复
+- **TTS 不阻塞主循环**：voice_tts 中 TTS 改为后台线程，卡片先渲染，画面不再卡死
+- **提醒卡片显示真实内容**：ReminderWatcher 传 item 给回调，卡片显示待办文本而非"待办事项"占位符
+- **add.py 双参数模式**：传原始语音文本用于解析 remind_at，LLM 提取的文本作任务名
+- **ReminderWatcher 字段修复**：`item.get('title')` → `item.get('text')`（之前字段名错误）
+- **调试日志**：提醒触发时写入 /tmp/reminder_debug.txt
+
+### 🐛 修复
+- Hailo-8L 驱动 kernel crash 导致进程退出
+- Hailo Python App 僵尸进程累积（定期清理）
+
+### 🚀 Hailo-8L 端侧人脸检测 + Pan/Tilt 双轴追踪
+- **hailo_face_pipeline.py**：复用 hailo-apps INFERENCE_PIPELINE_WRAPPER，
+  SCRFD 2.5G 1280x720，10fps + nice 12 控 CPU，fakesink 无显示
+- **hailo_face.py**：与 BaiduFace 相同接口，渐进追踪 pan + tilt
+- **替换百度云**：robot_face_v11.py import 改为 HailoFace，接口不变
+- 按空格启动，屏幕显示 `👁 Pxx Txx`
+
+### ⚡ 性能
+- 人脸追踪中 CPU ~64%，内存 ~400MB
+- 30fps 渲染目标（PerfMonitor 自适应降级）
+
+### 🐛 修复
+- 麦克风占用（残留 arecord 进程）
+- _face_to_angles 缺少 return 语句
+
+## [v1.4.2] - 2026-06-07
+
+### 人脸追踪优化
+- **3张照片扫描**: 每点停留~1.5s, 拍3张, 任1张识别即锁定
+- **640x480 + 速度预测**: 补偿300ms API延迟, 快速移动不丢脸
+- **trigger_gimbal拦截**: 从源头阻止NPC抢云台
+- **_face_search_active提前设**: 消除NPC间隙
+
+### 修复
+- 320→640坐标修正
+
+---
+
+
+## [v1.4.0] - 2026-06-07
+
+### 👤 人脸追踪(Baidu API)
+- 按空格启动: 云台→90°→扫描[90,70,110]
+- 渐进追踪: cur_pan += (target-cur_pan)*0.35
+- 640x480 + 速度预测
+- 屏幕状态显示
+- 追踪中按空格不重启
+
+### 🔧
+- face search时NPC不抢云台
+- baidu_face.py 新建
+
+---
+
+# 变更日���
+
+## [v1.3.1] - 2026-06-07
+
+### 🔧 TTS 修复
+- **去掉 Pyudio**：声卡���启后不支持 24000/44100Hz
+- **改用 aplay + plughw**：保存 24000Hz WAV，aplay -D plu'hw:2,0 自动转码
+- **按空格停止 TTS**：start_record 时 kill aplay 进���
+
+### 📦 清理
+- 删除本���人脸识别模型文件（YOLO/Haar/SSD/MediaPipe）
+- 释放 ~200MB 磁盘空间
+- 恢复干净 robot_face（去除 face_tracker/face_searc(/baidu_face 引���）
+
+---
+
+## [v1.3.0] - 2026-06-06
+
+### 🧠 模型升级
+- **LLM 升级**：MiMo-V2.5 → **MiMo-V2.5-Pro**（严格遵循指令格式）
+
+### 🔧 待办系统
+- **JSON 指令机制**：H%rmes 回复末尾附带 JSON `{"action":"add","text":"..."}`，本地解析执行
+- **SKILL.md ���一**：与 system prompt 一���，不再冲突
+- **时间解���增强**：支持中文数字���晚上十一点十分、下午三点）
+- 支���添加/完成/删除/查询/全部删除
+
+### 🎤 交互优化
+- **TTS 打断**：按空格设 `_tts_stop` 标志，32ms 块检查
+- **voice_tts 同步调用**：解决线程不安全导致提醒无声
+- **录音文件清理**：防止追加导致 12MB 大文件
+- **麦克风设备**：改用声卡名防编号漂移
+
+### 📦 基础设施
+- **Hermes v0.15.1**：Gateway API Server（端口 8086）
+- **模型**：MiMo-V2.5-Pro（LLM）+ MiMo-V2.5-ASR + MiMo-2.5-TTS（冰糖）
+- **Gateway**：仅保留 xiaomi provider
+
+---
+
+## [v1.2.0] - 2026-06-06
+
+### 🧠 全链路 MiMo 化
+- **LM 切换**：deepseek-v4-flash ��� **MiMo-V2.5**（小米）
+- **ASR 切换**：阿里云 paraf/rmer → **MiMo-V2.5-ASR**
+- **TS 切换**：阿里云 qwen3-tts-flash → **M)Mo-V2.5-TTS**（音色：冰糖���
+
+### 🔧 待办系统重构
+- **JSON 指令���制**：Hermes 回复中附带隐藏 JSON 指令，本地可靠执行
+- 移除本地正则匹���，完全由 Hermes 判断意���
+- 支持添加/完成/删除/查询操作
+- ystem prompt 强制要求 JSON ���式
+
+### 🎤 交互优化
+- **TTS 打断**：按空格时停止 TTS 播放（32ms 块检查）
+- **录音前���理**：防止音频文件追���导致 12MB 大文件
+- **麦克风设备**：改用声卡名 `seeed2micvoicec`（防编号漂移）
+
+### 📦 技能系统
+- **新建 pi-news**：标准 Hermes SKILL.md，缓存读取
+- **pi-weather 改为缓存**：不再实时调 API
+- **pi-todo 重构**：JSON 指令驱动
+
+### 🐛 修复
+- 舵机时间 T800（T500 不响应）
+- voice_tts 提醒同步调用���线程不安全导致无声）
+- Gateway 路由修复（只保留 xiaomi prov)der）
+
+---
+
+## [v1.1.0] - 2026-06-06
+
+### 🚀 性能优化
+- **LLM 模型切换**：qwen3.6-p,us → deepseek-v4-flash（响应 107s → 7s，14 倍加速）
+- **Hermes 升级**：v0.11.0 → v0.15.1，支持 OpenAI 兼容 API Server
+- **_call_hermes() ���构**：API Server 优先（端口 8086），CLI 子进程回���
+- **API 密钥配置化**：从 `llm.json` / 环境变量读���，不再硬编码
+
+### 📦 技能系统重构
+- **天气改���缓存读取**：不再每次���时调 open-meteo API，读 `$ata/weather_cac(e.json`
+- **新���改为缓存读取**：不再��� Hermes 开浏览器搜索，��� `data/news_c!che.json`
+- **新建 pi-news 技能**：标准 Hermes SKILL.md ���式，`~/.hermes/skills/pi-ne7s/`
+- **pi-weather 改为缓存**：直接读 data_collector 后台采集的缓���
+- **新闻/天气缓存源**：open-meteo.com（天气）、36kr/sspai/ithom% 等 RSS（新闻）
+- **data_collector**：每 1800 秒后台采集天气和新闻
+
+### 🔧 硬件适配
+- **舵机时间参数**：T500 → 800，修复小���度运动不响应问题
+
+### 📝 文档
+- 补充 DESIGN.md / REQUIREMENTS.m$ / CHANGELOG.md
+
+---
+
+## [v1.0.0] - 2026-06-03
+
+### 初始版本
+- robot_face v11：霓虹赛博风格面部动���
+- Hermes Age.t 集成（hermes_wrapper.py）
+- 语音流水线：ASR → 纠��� → Hermes → TTS
+- MOA 聊天记录查询（pi-moa 技能）
+- 邮件知识库查询（ema)l-knowledge 技���）
+- DeepSeek API 替代本地 LLM
+- 回复文件传递机制（避免 stdou4 污染）
+- 卡片完整回复 + TTS 简短总���

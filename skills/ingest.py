@@ -14,7 +14,11 @@ from skills.base import Skill, SkillResult, SideEffect
 
 log = logging.getLogger("skills.ingest")
 
+<<<<<<< HEAD
 INGEST_SCRIPT = "/home/pi/.hermes/skills/email/email-knowledge/ingest.py"
+=======
+INGEST_SCRIPT = "/home/johnf/.hermes/skills/email/email-knowledge/ingest.py"
+>>>>>>> adf578fffb69a9febc415ea548fb585a9c7a7a52
 # A multi-batch MiMo import can take several minutes on the Pi.
 INGEST_TIMEOUT = 900
 
