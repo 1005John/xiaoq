@@ -91,7 +91,7 @@ def get_db_parts_since(rowid):
     try:
         db = sqlite3.connect(MW_DB)
         rows = db.execute(
-            "SELECT rowid, data FROM part WHERE rowid > ? ORDER BY rowid ASC LIMIT 200",
+            "SELECT rowid, data FROM part WHERE rowid > ? ORDER BY rowid ASC LIMIT 50",
             (rowid,)
         ).fetchall()
         db.close()
@@ -102,7 +102,7 @@ def get_db_parts_since(rowid):
                 "rowid": row[0],
                 "type": d.get("type", ""),
                 "tool": d.get("tool", ""),
-                "text": (d.get("text", "") or "")
+                "text": (d.get("text", "") or "")[:200]
             })
         return result
     except:
@@ -112,17 +112,20 @@ def get_latest_reply(rowid):
     try:
         db = sqlite3.connect(MW_DB)
         rows = db.execute(
-            "SELECT data FROM part WHERE data LIKE '%\"type\":\"text\"%' ORDER BY rowid DESC LIMIT 30",
+            "SELECT data FROM part WHERE rowid <= ? AND data LIKE '%\"type\":\"text\"%' ORDER BY rowid DESC LIMIT 10",
+            (rowid,)
         ).fetchall()
         db.close()
         for row in rows:
             d = json.loads(row[0])
             text = d.get("text", "")
-            if text and len(text.strip()) > 10 and "系统指令" not in text and "使用cmit" not in text:
-                return text.strip()
-        return ""
+            if text and len(text.strip()) > 3:
+                if not any(kw in text for kw in ["请先列出", "执行计划", "步骤1", "生成的文件用curl"]):
+                    return text.strip()[:500]
     except:
-        return ""
+        pass
+    return ""
+
 def push_event(etype, data):
     evt = {"time": time.time(), "type": etype, "data": data}
     last_events.append(evt)

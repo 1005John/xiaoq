@@ -4943,9 +4943,10 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
         import time as _time
         self._proc_start = _time.time()
         try:
-            if not self._face_authorized_for_dialogue():
-                self._finish_face_authorization_failure(speak=speak)
-                return
+            # 跳过人脸授权检查（HailoFace 未启动）
+            # if not self._face_authorized_for_dialogue():
+            #     self._finish_face_authorization_failure(speak=speak)
+            #     return
             # 调试: 写ASR开始标记
             with open('/tmp/voice_debug.txt','w') as _f:
                 _f.write(f"wav={wav_path} size={os.path.getsize(wav_path) if os.path.exists(wav_path) else 0}\\n")
@@ -5159,7 +5160,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
             with open('/tmp/voice_debug.txt','a') as _f:
                 _f.write("tts returned\n")
         finally:
-            self._pending = False
+            pass  # _pending 由主线程通过 _pending_mw_reply 消费时清除
 
     def _answer_current_camera(self, question, speak=True, reply_path=""):
         """Answer one voice question from the Hailo-exported current camera frame."""
@@ -5306,7 +5307,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
         """Publish a direct MiMo chat reply without entering the Hermes agent."""
         self.reply_text = reply
         self._write_mobile_reply(reply_path, "completed", reply)
-        if ws_server:
+        if ws_server and not _chat_mode:
             ws_server.command_queue.append({
                 "type": "card_show",
                 "title": "回复",
@@ -5450,142 +5451,108 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                 self.state = "idle"
 
     def _route_mw_gateway(self, txt, speak=True, reply_path=""):
-        global _chat_lines
+        """MW Agent Gateway 调用 — 用 curl 子进程避免 segfault"""
+        global _chat_lines, _pending_mw_reply
         self._pending = True
+        print("[GW] start: " + txt[:30], flush=True)
         try:
-            self.state = "thinking"
-            import urllib.request as _ur, json as _json, time as _t
+            import subprocess as _sp, json as _json, time as _t, os as _os, glob as _gl, urllib.parse as _up
             _gw = "http://127.0.0.1:9800"
-            # 用户消息已在 process_text 里添加
             _p = txt
             if "ppt" in txt.lower(): _p = txt + "。使用cmit模板。"
-            # 系统提示词：生成文件后自动上传到 PC
             _sys_hint = (
-                "\n\n[系统指令] 如果你生成了文件输出（.pptx/.md/.html/.markmap/.svg/.pdf/.docx 等），"
-                "必须使用以下命令将文件上传到用户的电脑："
+                "\n\n[系统指令] 如果你生成了文件输出（.pptx/.md/.html/.svg/.pdf/.docx 等），"
+                "必须使用 curl 上传到用户电脑："
                 "curl -X POST 'http://192.168.137.1:9998/?filename=文件名' "
                 "-H 'Content-Type: application/octet-stream' --data-binary @文件路径。"
-                "上传后在回复中告诉用户文件已传到PC的D:\\XiaoQ_Share目录。"
+                "上传后告诉用户文件已传到PC的D:\\XiaoQ_Share目录。"
             )
             _p = _p + _sys_hint
-            _body = _json.dumps({"prompt": _p}).encode("utf-8")
-            _req = _ur.Request(_gw + "/", data=_body, headers={"Content-Type": "application/json"})
-            _resp = _ur.urlopen(_req, timeout=30)
-            _result = _json.loads(_resp.read().decode())
-            if _result.get("ok"):
-                _rowid = _result.get("initial_rowid", 0)
-                self._shown_rowids = set()  # 每轮清空
-                while True:
-                    _t.sleep(1)
-                    # 先获取 progress（实时更新思考+文字）
-                    try:
-                        _pdata = _json.loads(_ur.urlopen(_ur.Request(_gw + "/progress"), timeout=5).read().decode())
-                        _parts = _pdata.get("parts", [])
-                        for _part in _parts:
-                            _prid = _part.get("rowid", 0)
-                            if _prid and _prid not in self._shown_rowids:
-                                _ptype = _part.get("type", "")
-                                _ptext = _part.get("text", "")
-                                # text 为空时不记录 rowid（下次重新获取）
-                                if not _ptext and _ptype not in ("tool", "step-start", "step-finish", "compaction"):
-                                    continue
-                                self._shown_rowids.add(_prid)
-                                # 跳过用户消息
-                                if _ptype == "text" and _ptext.strip() == txt.strip():
-                                    continue
-                                if _ptype == "text" and _ptext:
-                                    if _chat_lines and _chat_lines[-1].get("role") == "assistant":
-                                        _chat_lines[-1]["text"] = _ptext
-                                    else:
-                                        _chat_lines.append({"role": "assistant", "text": _ptext})
-                                    print("[MW] " + _ptext[:60], flush=True)
-                                elif _ptype == "reasoning" and _ptext:
-                                    _chat_lines.append({"role": "reasoning", "text": _ptext})
-                                    print("[MW-REASON] " + _ptext[:60], flush=True)
-                                elif _ptype in ("step-start", "step-finish", "step") and _ptext:
-                                    _chat_lines.append({"role": "reasoning", "text": _ptext})
-                                    print("[MW-STEP] " + _ptext[:60], flush=True)
-                                else:
-                                    if _ptype not in ("step-start", "step-finish", "tool", "compaction"):
-                                        print(f"[MW-DEBUG] type={_ptype} text={_ptext[:40]}", flush=True)
-                    except Exception as _pe:
-                        print("[MW-ERR] progress: " + str(_pe)[:60], flush=True)
-                    # 检查是否完成
-                    _s = _json.loads(_ur.urlopen(_ur.Request(_gw + "/status"), timeout=5).read().decode())
-                    if _s.get("status") == "done":
-                        # 最后再获取一次 progress，确保拿到最终回复
+            # POST 提交 prompt
+            _r = _sp.run(["curl", "-s", "-m", "30", "-X", "POST", "-H", "Content-Type: application/json",
+                          "-d", _json.dumps({"prompt": _p}), _gw + "/"],
+                         capture_output=True, timeout=35)
+            _result = _json.loads(_r.stdout.decode())
+            if not _result.get("ok"):
+                _pending_mw_reply = ("MW不可用", speak, reply_path)
+                return
+            _shown_rowids = set()
+            while True:
+                _t.sleep(1)
+                # GET progress
+                try:
+                    _r2 = _sp.run(["curl", "-s", "-m", "5", _gw + "/progress"], capture_output=True, timeout=8)
+                    _pdata = _json.loads(_r2.stdout.decode())
+                    for _part in _pdata.get("parts", []):
+                        _prid = _part.get("rowid", 0)
+                        if _prid and _prid not in _shown_rowids:
+                            _ptype = _part.get("type", "")
+                            _ptext = _part.get("text", "")
+                            if not _ptext and _ptype not in ("tool", "step-start", "step-finish", "compaction"):
+                                continue
+                            _shown_rowids.add(_prid)
+                            if _ptype == "text" and ("系统指令" in _ptext or txt.strip() in _ptext):
+                                continue
+                            if _ptype == "text" and _ptext:
+                                _chat_lines.append({"role": "assistant", "text": _ptext})
+                                print("[MW] " + _ptext[:60], flush=True)
+                            elif _ptype == "reasoning" and _ptext:
+                                _chat_lines.append({"role": "reasoning", "text": _ptext})
+                                print("[MW-REASON] " + _ptext[:60], flush=True)
+                except Exception as _pe:
+                    print("[MW-ERR] " + str(_pe)[:60], flush=True)
+                # GET status
+                _r3 = _sp.run(["curl", "-s", "-m", "5", _gw + "/status"], capture_output=True, timeout=8)
+                _s = _json.loads(_r3.stdout.decode())
+                if _s.get("status") == "done":
+                    # GET result（不再获取 progress，避免覆盖中间输出）
+                    _r5 = _sp.run(["curl", "-s", "-m", "5", _gw + "/result"], capture_output=True, timeout=8)
+                    _rr = _json.loads(_r5.stdout.decode())
+                    _reply = _rr.get("reply", "")
+                    if not _reply:
+                        _reply = "MW已完成但没有回复内容"
+                    if _reply:
+                        # 不再重复添加到 _chat_lines（progress 轮询时已添加）
+                        # 只设置 _pending_mw_reply 用于 TTS
+                        print("[MW] Reply: " + _reply[:60], flush=True)
+                        # 自动上传 PPT
                         try:
-                            _pdata = _json.loads(_ur.urlopen(_ur.Request(_gw + "/progress"), timeout=5).read().decode())
-                            _parts = _pdata.get("parts", [])
-                            for _part in _parts:
-                                _prid = _part.get("rowid", 0)
-                                if _prid and _prid not in self._shown_rowids:
-                                    self._shown_rowids.add(_prid)
-                                    _ptype = _part.get("type", "")
-                                    _ptext = _part.get("text", "")
-                                    if _ptype == "text" and _ptext.strip() == txt.strip():
-                                        continue
-                                    if _ptype == "text" and _ptext:
-                                        if _chat_lines and _chat_lines[-1].get("role") == "assistant":
-                                            _chat_lines[-1]["text"] = _ptext
-                                        else:
-                                            _chat_lines.append({"role": "assistant", "text": _ptext})
-                                        print("[MW] " + _ptext[:60], flush=True)
-                                    elif _ptype == "reasoning" and _ptext:
-                                        _chat_lines.append({"role": "reasoning", "text": _ptext})
-                                        print("[MW-REASON] " + _ptext[:60], flush=True)
-                        except:
-                            pass
-                        _r = _json.loads(_ur.urlopen(_ur.Request(_gw + "/result"), timeout=5).read().decode())
-                        _reply = _r.get("reply", "")
-                        if not _reply:
-                            try:
-                                _pd2 = _json.loads(_ur.urlopen(_ur.Request(_gw + "/progress"), timeout=5).read().decode())
-                                for _p2 in reversed(_pd2.get("parts", [])):
-                                    if _p2.get("type") == "text":
-                                        _t2 = _p2.get("text", "")
-                                        if _t2 and len(_t2.strip()) > 10 and "系统指令" not in _t2 and "使用cmit" not in _t2:
-                                            _reply = _t2.strip()
-                                            break
-                            except:
-                                pass
-                        if _reply:
-                            if not _chat_lines or _chat_lines[-1].get("text") != _reply:
-                                _chat_lines.append({"role": "assistant", "text": _reply})
-                            print("[MW] Reply: " + _reply[:60], flush=True)
-                            try:
-                                import subprocess as _sp, glob as _gl, os as _os2, urllib.parse as _up2
-                                _files = _gl.glob("/home/pi/MobileWork/**/*.pptx", recursive=True)
-                                _files.sort(key=_os2.path.getmtime, reverse=True)
-                                for _fp in _files[:3]:
-                                    if time.time() - _os2.path.getmtime(_fp) < 300:
-                                        _fn = _os2.path.basename(_fp)
-                                        print("[MW] Uploading: " + _fn, flush=True)
-                                        _sp.run(["curl", "-s", "-X", "POST", "-H", "Content-Type: application/octet-stream", "--data-binary", "@" + _fp, "http://192.168.137.1:9998/?filename=" + _up2.quote(_fn)], timeout=30, capture_output=True)
-                                        _chat_lines.append({"role": "assistant", "text": "已传到PC: " + _fn})
-                                        print("[MW] Uploaded: " + _fn, flush=True)
-                            except Exception as _ue:
-                                print("[MW] Upload err: " + str(_ue), flush=True)
-                            self._finish_direct_chat(_reply, speak, reply_path)
-                        else:
-                            self._finish_direct_chat("MW已完成", speak, reply_path)
-                        return
-
-                self._finish_direct_chat("MW超时", speak, reply_path)
-            else:
-                self._finish_direct_chat("MW不可用", speak, reply_path)
+                            _files = _gl.glob("/home/pi/MobileWork/**/*.pptx", recursive=True)
+                            _files.sort(key=_os.path.getmtime, reverse=True)
+                            for _fp in _files[:3]:
+                                if _t.time() - _os.path.getmtime(_fp) < 300:
+                                    _fn = _os.path.basename(_fp)
+                                    print("[MW] Upload: " + _fn, flush=True)
+                                    _sp.run(["curl", "-s", "-X", "POST", "-H", "Content-Type: application/octet-stream",
+                                             "--data-binary", "@" + _fp, "http://192.168.137.1:9998/?filename=" + _up.quote(_fn)],
+                                            timeout=30, capture_output=True)
+                                    _chat_lines.append({"role": "assistant", "text": "已传到PC: " + _fn})
+                                    print("[MW] Uploaded: " + _fn, flush=True)
+                        except Exception as _ue:
+                            print("[MW] Upload err: " + str(_ue)[:60], flush=True)
+                        _pending_mw_reply = (_reply, speak, reply_path)
+                    else:
+                        _pending_mw_reply = ("MW已完成", speak, reply_path)
+                    return
         except Exception as _e:
-            print("[MW] Error: " + str(_e), flush=True)
-            self._finish_direct_chat("MW失败", speak, reply_path)
+            print("[MW] Error: " + str(_e)[:60], flush=True)
+            _pending_mw_reply = ("MW失败", speak, reply_path)
         finally:
             self._pending = False
 
     def process_text(self, txt, speak=True, reply_path=""):
-        """直接处理文本；手机请求可选择是否播报，并等待文字结果。"""
+        """直接处理文本"""
         global _chat_mode, _chat_lines
-        # MW 模式切换优先（不受 _pending 限制）
+        print(f"[PT] txt={txt[:20]} chat_mode={_chat_mode}", flush=True)
+        # MW 模式切换（优先，不受 _pending 限制）
         if txt and ("进入移动办公" in txt or "进入办公" in txt):
             _chat_mode = True
+            # 停止 HailoFace/picamera2（避免 TTS 时 segfault）
+            try:
+                _stop_face_tracking()
+                print("[Face] Stopped for MW mode", flush=True)
+            except:
+                pass
             self.state = "speaking"
             self.tts("已进入移动办公模式",
                 on_start=lambda: setattr(self, "state", "speaking"),
@@ -5602,9 +5569,9 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
             return
         if _chat_mode:
             print("[Mode] MW: " + txt[:40], flush=True)
-            # 先在主线程添加用户消息（确保立即渲染显示）
+            print("[MW-THREAD] starting thread", flush=True)
             _chat_lines.append({"role": "user", "text": txt})
-            self._pending = False
+            self._pending = True
             import threading as _th
             _th.Thread(target=self._route_mw_gateway, args=(txt, speak, reply_path), daemon=True).start()
             return
@@ -5625,7 +5592,8 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
 
             self.state = "thinking"
 
-            # 跳过人脸授权检查（HailoFace 未启动时不需要）
+            # 跳过人脸授权检查
+            # # 跳过人脸授权检查
             # if not self._face_authorized_for_dialogue():
             #     self._finish_face_authorization_failure(speak=speak, reply_path=reply_path)
             #     return
@@ -5655,7 +5623,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                         _CONTEXT["last_intent"] = None
                         _CONTEXT["last_skill"] = None
                         _remember_task_context("chat", txt, _reply)
-                        self._finish_direct_chat(_reply, speak, reply_path)
+                        # _finish_direct_chat 由主线程通过 _pending_mw_reply 调用
                         return
                     elif _jev_route_name == "todo":
                         # 待办：本地 TodoSkill
@@ -7084,6 +7052,7 @@ class WSServer:
             elif cmd_type == "voice_stop":
                 wf = voice_mgr.stop_record()
                 if wf:
+                    print("[VI] starting thread", flush=True)
                     threading.Thread(
                         target=voice_mgr.process_voice,
                         args=(wf,),
@@ -7491,11 +7460,14 @@ _face_search_active = False
 _chat_mode = False
 _chat_lines = []
 _chat_scroll = 0
+_touch_offset = 0
 _chat_cursor_timer = 0
 _chat_cursor_visible = True
-face_registry = FaceRegistry()
+_pending_mw_reply = None
+_chat_start_idx = 0
 
 def _wrap_text_md(text, font, max_width):
+    """简单文字换行"""
     lines = []
     current = ""
     for char in text:
@@ -7512,6 +7484,8 @@ def _wrap_text_md(text, font, max_width):
     if current:
         lines.append(current)
     return lines
+
+face_registry = FaceRegistry()
 
 _face_gimbal_owned_last = False
 _sleep_timer = 0
@@ -7618,26 +7592,11 @@ def _capture_face_authorization_failure_photo():
 
 
 def _start_face_tracking():
-    """Start the Hailo tracker once when the camera and gimbal are available."""
+    """HailoFace 已禁用 — picamera2 + GStreamer 管线会导致 segfault"""
     global _face_search, _face_search_active
-    if gimbal_ctrl is None or _face_search_active or mobile_gimbal_is_manual() or _mobile_camera_reserved:
-        return
-    try:
-        # 跳过 picamera2 检查（会导致 segfault）
-        _face_search = HailoFace(
-            gimbal_ctrl,
-            frame_callback=_on_face_frame_for_gesture,
-            registry=face_registry,
-        )
-        _face_search.start()
-        _face_search_active = True
-        print("[Face] Hailo 人脸检测与云台追踪已启动")
-    except Exception as _face_error:
-        print(f"[Face] 人脸追踪不可用: {_face_error}")
-        _face_search = None
-        _face_search_active = False
-
-
+    _face_search = None
+    _face_search_active = False
+    return
 def _stop_face_tracking():
     """Release the camera before the mobile app takes manual or visual control."""
     global _face_search, _face_search_active
@@ -7914,6 +7873,14 @@ while running:
         if ambient_mgr_inst._mood != npc_mood:
             ambient_mgr_inst.set_mood(npc_mood)
 
+    # 检查 MW 回复（在主线程里调用 TTS）
+    if _pending_mw_reply is not None:
+        _mw_r, _mw_s, _mw_rp = _pending_mw_reply
+        _pending_mw_reply = None
+        # _pending 在 TTS on_end 回调里清除
+        voice_mgr._pending = False
+        voice_mgr._finish_direct_chat(_mw_r, _mw_s, _mw_rp)
+
     if _chat_mode:
         # ── MW 移动办公模式（聊天界面）──
         # 先清屏（聊天显示模式）
@@ -7921,11 +7888,11 @@ while running:
         if face_style == 'cute':
             # 元气活力风格：跟表情配色一致
             screen.fill(CuteStyle.BG_COLOR)  # (240,208,192) 肤黄肤色背景
-            _C_USER = CuteStyle.BLUSH_COLOR   # (193,77,51) 腮红色 — 用户问题
+            _C_USER = CuteStyle.BLUSH_COLOR    # (55,48,42) 深棕色 — 用户问题
             _C_TEXT = (40, 35, 30)           # 接近黑色 — Agent 回复
-            _C_HEAD1 = (120, 50, 80)         # 深玫红标题
-            _C_HEAD2 = (140, 60, 90)         # 玫红标题
-            _C_HEAD3 = (160, 70, 100)        # 浅玫红
+            _C_TEXT = (120, 50, 80)         # 深玫红标题
+            _C_TEXT = (140, 60, 90)         # 玫红标题
+            _C_TEXT = (160, 70, 100)        # 浅玫红
             _C_REASON = (130, 110, 100)      # 灰棕思考
             _C_BOLD = (30, 25, 20)           # 纯黑粗体
             _C_LIST = (70, 60, 55)           # 棕灰列表
@@ -7940,9 +7907,6 @@ while running:
             screen.fill((8, 8, 16))
             _C_USER = (255, 220, 60)
             _C_TEXT = (240, 240, 245)
-            _C_HEAD1 = (100, 180, 255)
-            _C_HEAD2 = (130, 200, 255)
-            _C_HEAD3 = (160, 210, 255)
             _C_REASON = (120, 120, 140)
             _C_BOLD = (255, 255, 255)
             _C_LIST = (200, 200, 210)
@@ -7955,8 +7919,8 @@ while running:
 
         try:
             _font = renderer.font_cn_h
-            _font.size = 36
-            _line_h = 40
+            _font.size = 32
+            _line_h = 64
             _margin_x = 20
             _margin_top = 16
             _face_area = 80
@@ -7988,7 +7952,7 @@ while running:
             _table_rows = []
             _is_first_table_row = False
 
-            for _cl_item in _chat_lines:
+            for _cl_item in list(_chat_lines):
                 if isinstance(_cl_item, dict):
                     _ctype = _cl_item.get("role", "assistant")
                     _text = _cl_item.get("text", "")
@@ -8002,12 +7966,12 @@ while running:
                     continue
 
                 # 用户问题
-                if _ctype == "user" or _ctype == "human":
+                if _ctype == "user":
                     _render_items.append(("user", _text, _C_USER, 0))
                     continue
 
                 # 思考过程
-                if _ctype == "reasoning" or _ctype == "reason":
+                if _ctype == "reasoning":
                     _render_items.append(("reason", _text, _C_REASON, 0))
                     continue
 
@@ -8029,13 +7993,13 @@ while running:
 
                 # 标题
                 if _t.startswith("### "):
-                    _render_items.append(("h3", _strip_bold(_t[4:]), _C_HEAD3, 0))
+                    _render_items.append(("text", _strip_bold(_t[4:]), _C_TEXT, 0))
                     continue
                 if _t.startswith("## "):
-                    _render_items.append(("h2", _strip_bold(_t[3:]), _C_HEAD2, 0))
+                    _render_items.append(("text", _strip_bold(_t[3:]), _C_TEXT, 0))
                     continue
                 if _t.startswith("# "):
-                    _render_items.append(("h1", _strip_bold(_t[2:]), _C_HEAD1, 0))
+                    _render_items.append(("text", _strip_bold(_t[2:]), _C_TEXT, 0))
                     continue
 
                 # 列表
@@ -8064,43 +8028,35 @@ while running:
                     _render_items.append(("codeblock", "", _C_CODE, 0))
                     continue
 
-                # 普通文字（处理粗体标记）
-                _render_items.append(("text", _strip_bold(_t), _C_TEXT, 0))
+                # 普通文字（拆成多行，每行一个 item）
+                _wrapped_lines = _wrap_text_md(_strip_bold(_t), _font, WIDTH - _margin_x * 2)
+                for _wl in _wrapped_lines:
+                    _render_items.append(("text", _wl, _C_TEXT, 0))
 
             # ── 渲染 ──
             _y = _margin_top
-            _rendered_heights = []
 
-            # ── 自动滚动：从后往前算能放多少行 ──
-            _visible_h = _max_y - _margin_top - _line_h  # 多留一行余量
-            _accum_h = 0
+            # 先正向遍历所有 items，计算每个 item 的行数
+            _item_lines = []  # 每个 item 占用的行数
+            for _ri in _render_items:
+                _t = str(_ri[1])
+                _indent = _ri[3] * 30
+                _wl = _wrap_text_md(_t, _font, WIDTH - _margin_x * 2 - _indent)
+                _item_lines.append(max(1, len(_wl)))
+
+            # 从后往前找起始位置，确保最后一行留一行给光标
+            _avail_h = _max_y - _margin_top - _line_h  # 留一行给光标
+            _accum = 0
             _start_idx = 0
-            _last_user_idx = -1
-            # 找到最后一条用户消息的位置
-            for _ui, _uri in enumerate(_render_items):
-                if _uri[0] == "user":
-                    _last_user_idx = _ui
-            # 从后往前算
             for _i in range(len(_render_items) - 1, -1, -1):
-                _ri = _render_items[_i]
-                if _ri[0] == "empty":
-                    _ih = _line_h // 2
-                elif _ri[0] == "h1":
-                    _ih = _line_h + 8
-                elif _ri[0] == "h2":
-                    _ih = _line_h + 4
-                else:
-                    _ih = _line_h * max(1, len(_wrap_text_md(str(_ri[1]), _font, WIDTH - _margin_x * 2 - (_ri[3] * 30))))
-                _accum_h += _ih
-                if _accum_h > _visible_h:
-                    _start_idx = _i
-                    # 确保最后一条用户消息在可见区域内
-                    if _last_user_idx >= 0 and _start_idx > _last_user_idx:
-                        _start_idx = max(0, _last_user_idx)
+                _accum += _item_lines[_i] * _line_h
+                if _accum > _avail_h:
+                    _start_idx = _i + 1
                     break
 
             for _item_idx, _item in enumerate(_render_items):
-                if _item_idx < _start_idx: continue
+                if _item_idx < _start_idx:
+                    continue
                 _itype = _item[0]
                 _icontent = _item[1]
                 _icolor = _item[2]
@@ -8108,10 +8064,9 @@ while running:
                 _indent_px = _iindent * 30
 
                 if _itype == "empty":
-                    _rendered_heights.append(("empty", _line_h // 2))
                     continue
 
-                if _y + _line_h > _max_y:
+                if _y + _line_h > _max_y - _line_h:
                     break
 
                 if _itype == "user":
@@ -8119,105 +8074,103 @@ while running:
                     _text = "> " + _icontent
                     _wrapped = _wrap_text_md(_text, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         _surf, _ = _font.render(_wl, _C_USER)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
-                        _rendered_heights.append(("user", _line_h))
 
                 elif _itype == "reason":
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         _surf, _ = _font.render(_wl, _C_REASON)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
-                        _rendered_heights.append(("reason", _line_h))
 
                 elif _itype == "h1":
-                    _font.size = 26
+                    _font.size = 32
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h + 4 > _max_y: break
-                        _surf, _ = _font.render(_wl, _C_HEAD1)
+                        if _y + _line_h + 4 > _max_y - _line_h: break
+                        _surf, _ = _font.render(_wl, _C_TEXT)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         # 标题下方画线
-                        pygame.draw.line(screen, _C_HEAD1, (_margin_x, _y + _line_h - 2), (WIDTH - _margin_x, _y + _line_h - 2), 1)
+                        pygame.draw.line(screen, _C_TEXT, (_margin_x, _y + _line_h - 2), (WIDTH - _margin_x, _y + _line_h - 2), 1)
                         _y += _line_h + 4
-                        _rendered_heights.append(("h1", _line_h + 4))
-                    _font.size = 26
+                    _font.size = 32
 
                 elif _itype == "h2":
-                    _font.size = 26
+                    _font.size = 30
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h + 2 > _max_y: break
-                        _surf, _ = _font.render(_wl, _C_HEAD2)
+                        if _y + _line_h + 2 > _max_y - _line_h: break
+                        _surf, _ = _font.render(_wl, _C_TEXT)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h + 2
-                        _rendered_heights.append(("h2", _line_h + 2))
-                    _font.size = 26
+                    _font.size = 32
 
                 elif _itype == "h3":
-                    _font.size = 42
+                    _font.size = 28
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
-                        _surf, _ = _font.render(_wl, _C_HEAD3)
+                        if _y + _line_h > _max_y - _line_h: break
+                        _surf, _ = _font.render(_wl, _C_TEXT)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
-                        _rendered_heights.append(("h3", _line_h))
-                    _font.size = 26
+                    _font.size = 32
 
                 elif _itype == "list":
                     # 圆点列表
                     _text = "• " + _icontent
                     _wrapped = _wrap_text_md(_text, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _i_wl, _wl in enumerate(_wrapped):
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         _surf, _ = _font.render(_wl, _C_LIST)
                         _blit_x = _margin_x + _indent_px
                         if _i_wl > 0:
                             _blit_x += 20  # 续行缩进
                         screen.blit(_surf, (_blit_x, _y))
                         _y += _line_h
-                        _rendered_heights.append(("list", _line_h))
+
+                elif _itype == "text":
+                    _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
+                    for _wl in _wrapped:
+                        if _y + _line_h > _max_y - _line_h: break
+                        _surf, _ = _font.render(_wl, _icolor)
+                        screen.blit(_surf, (_margin_x + _indent_px, _y))
+                        _y += _line_h
 
                 elif _itype == "list2":
                     _text = "◦ " + _icontent
                     _wrapped = _wrap_text_md(_text, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         _surf, _ = _font.render(_wl, _C_LIST)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
-                        _rendered_heights.append(("list2", _line_h))
 
                 elif _itype == "numlist":
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         _surf, _ = _font.render(_wl, _C_LIST)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
-                        _rendered_heights.append(("numlist", _line_h))
 
                 elif _itype == "separator":
                     # 分隔线
                     pygame.draw.line(screen, _C_SEP, (_margin_x, _y + _line_h // 2), (WIDTH - _margin_x, _y + _line_h // 2), 1)
                     _y += _line_h
-                    _rendered_heights.append(("sep", _line_h))
 
                 elif _itype == "quote":
                     # 引用：左侧竖线 + 灰色文字
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px - 10)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         pygame.draw.line(screen, _C_QUOTE, (_margin_x + _indent_px, _y), (_margin_x + _indent_px, _y + _line_h - 4), 2)
                         _surf, _ = _font.render(_wl, _C_QUOTE)
                         screen.blit(_surf, (_margin_x + _indent_px + 8, _y))
                         _y += _line_h
-                        _rendered_heights.append(("quote", _line_h))
 
                 elif _itype == "table_row":
                     # 表格行：绘制带背景的单元格
@@ -8229,7 +8182,7 @@ while running:
                     _cell_h = _line_h
                     _is_header = False
                     # 检查是否是第一行（表头）
-                    if _rendered_heights and _rendered_heights[-1][0] not in ("table_row", "table_header"):
+                    if True:
                         _is_header = True
 
                     for _ci, _cell in enumerate(_cells):
@@ -8247,20 +8200,17 @@ while running:
                             _surf, _ = _font.render(_cell_wrapped[0], _cell_color)
                             screen.blit(_surf, (_cx + 4, _y + 2))
                     _y += _cell_h
-                    _rendered_heights.append(("table_row", _cell_h))
 
                 elif _itype == "codeblock":
                     _y += 4
-                    _rendered_heights.append(("code", 4))
 
                 else:  # text
                     _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
-                        if _y + _line_h > _max_y: break
+                        if _y + _line_h > _max_y - _line_h: break
                         _surf, _ = _font.render(_wl, _C_TEXT)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
-                        _rendered_heights.append(("text", _line_h))
 
             # 滚动提示
             if _chat_scroll > 0:
@@ -8345,8 +8295,16 @@ while running:
             screen.blit(_mini_scaled, (WIDTH - _face_area - 8, HEIGHT - _mini_scaled.get_height() - 4))
         
         except Exception as _render_err:
-            print(f"[RENDER_ERR] {_render_err}", flush=True)
+            print(f"[MW-EXCEPT] {_render_err}", flush=True)
 
+        # 在最后一行显示光标
+        if _chat_cursor_visible and _chat_lines:
+            try:
+                _cursor_y = min(_y, _max_y - _line_h * 2)
+                _surf_c, _ = _font.render("_", _C_TEXT)
+                screen.blit(_surf_c, (_margin_x, _cursor_y))
+            except:
+                pass
         pygame.display.flip()
         continue
 

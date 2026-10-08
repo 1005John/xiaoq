@@ -7,6 +7,7 @@ mkdir -p "$LOG_DIR"
 cd "$ROOT_DIR"
 export PYTHONPATH="${ROOT_DIR}:${HOME}/hailo-apps"
 export PYTHONUNBUFFERED=1
+export PYTHONDONTWRITEBYTECODE=1
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export WAYLAND_DISPLAY="wayland-0"
 export SDL_VIDEODRIVER="wayland"
