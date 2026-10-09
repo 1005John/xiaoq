@@ -79,16 +79,25 @@ AIOT_LLM_MODEL = os.environ.get("AIOT_LLM_MODEL", "Auto")
 AIOT_ASR_MODEL = os.environ.get("AIOT_ASR_MODEL", "TS/SenseVoiceSmall")
 
 
-def _llm_chat(messages, max_tokens=500, timeout=30, json_mode=False):
+def _llm_chat(messages, max_tokens=500, timeout=60, json_mode=False):
     """Unified LLM call using AIoT DeepSeek-V4."""
-    import urllib.request as _ur, json as _json
+    import urllib.request as _ur, json as _json, ssl as _ssl
+    _ctx = _ssl.create_default_context()
+    _ctx.check_hostname = False
+    _ctx.verify_mode = _ssl.CERT_NONE
     body_dict = {"model": AIOT_LLM_MODEL, "messages": messages, "max_tokens": max_tokens}
     if json_mode:
         body_dict["response_format"] = {"type": "json_object"}
     body = _json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
     req = _ur.Request(AIOT_BASE + "/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + AIOT_KEY})
-    with _ur.urlopen(req, timeout=timeout) as resp:
+    print("[LLM] calling onerouter...", flush=True)
+    with _ur.urlopen(req, timeout=timeout, context=_ctx) as resp:
+        print("[LLM] got response", flush=True)
+        _llm_data = _json.loads(resp.read().decode())
+        _llm_content = _llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        print(f"[LLM] content={repr(_llm_content[:60])} finish={_llm_data.get('choices',[{}])[0].get('finish_reason','')}", flush=True)
+        return _llm_content.strip() if _llm_content else ""
         data = _json.loads(resp.read().decode("utf-8"))
     return str(data["choices"][0]["message"]["content"]).strip()
 
@@ -5305,6 +5314,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
 
     def _finish_direct_chat(self, reply, speak, reply_path):
         """Publish a direct MiMo chat reply without entering the Hermes agent."""
+        global _chat_mode
         self.reply_text = reply
         self._write_mobile_reply(reply_path, "completed", reply)
         if ws_server and not _chat_mode:
@@ -5474,7 +5484,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                          capture_output=True, timeout=35)
             _result = _json.loads(_r.stdout.decode())
             if not _result.get("ok"):
-                _pending_mw_reply = ("MW不可用", speak, reply_path)
+                _pending_mw_reply = ("MW不可用", True, reply_path)
                 return
             _shown_rowids = set()
             while True:
@@ -5512,8 +5522,8 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                     if not _reply:
                         _reply = "MW已完成但没有回复内容"
                     if _reply:
-                        # 不再重复添加到 _chat_lines（progress 轮询时已添加）
-                        # 只设置 _pending_mw_reply 用于 TTS
+                        if not _chat_lines or _chat_lines[-1].get("text") != _reply:
+                            _chat_lines.append({"role": "assistant", "text": _reply})
                         print("[MW] Reply: " + _reply[:60], flush=True)
                         # 自动上传 PPT
                         try:
@@ -5530,13 +5540,13 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                                     print("[MW] Uploaded: " + _fn, flush=True)
                         except Exception as _ue:
                             print("[MW] Upload err: " + str(_ue)[:60], flush=True)
-                        _pending_mw_reply = (_reply, speak, reply_path)
+                        _pending_mw_reply = (_reply, True, reply_path)
                     else:
-                        _pending_mw_reply = ("MW已完成", speak, reply_path)
+                        _pending_mw_reply = ("MW已完成", True, reply_path)
                     return
         except Exception as _e:
             print("[MW] Error: " + str(_e)[:60], flush=True)
-            _pending_mw_reply = ("MW失败", speak, reply_path)
+            _pending_mw_reply = ("MW失败", True, reply_path)
         finally:
             self._pending = False
 
@@ -5615,6 +5625,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                     print(f"[JEV-ROUTE] {_jev_route_name} (conf={_jev_conf:.2f})", flush=True)
                     
                     if _jev_route_name == "chat":
+                        print("[CHAT] calling _llm_chat", flush=True)
                         # 聊天：用 LLM 直接回复
                         _reply = _llm_chat([
                             {"role": "system", "content": "你是语音助手小Q，用简洁口语回答。"},
@@ -5623,7 +5634,8 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                         _CONTEXT["last_intent"] = None
                         _CONTEXT["last_skill"] = None
                         _remember_task_context("chat", txt, _reply)
-                        # _finish_direct_chat 由主线程通过 _pending_mw_reply 调用
+                        self._pending = False
+                        self._finish_direct_chat(_reply, speak, reply_path)
                         return
                     elif _jev_route_name == "todo":
                         # 待办：本地 TodoSkill
@@ -7917,6 +7929,25 @@ while running:
             _C_CODE = (180, 180, 200)
             _C_QUOTE = (150, 150, 170)
 
+        # MW 模式统一配色（不管元气型还是霓虹型）
+        if _chat_mode:
+            screen.fill((242, 247, 252))  # #F2F7FC 背景
+            _C_USER = (58, 117, 229)      # #3A75E5 问题（蓝色）
+            _C_TEXT = (0, 0, 0)           # #000000 回答（黑色）
+            _C_REASON = (130, 130, 130)   # 灰色思考
+            _C_BOLD = (0, 0, 0)           # 黑色粗体
+            _C_LIST = (40, 40, 40)        # 深灰列表
+            _C_TABLE_HEAD = (200, 215, 235)
+            _C_TABLE_ROW = (230, 238, 248)
+            _C_TABLE_BORDER = (180, 195, 215)
+            _C_SEP = (200, 210, 225)
+            _C_CODE = (50, 50, 50)
+            _C_QUOTE = (80, 80, 80)
+            # MW 字体：问题和回答用黑体加粗大字号，思考用正常字体
+            _font_mw_bold = pygame.freetype.Font("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 38)
+            _font_mw_normal = renderer.font_cn_h
+            _font_mw_normal.size = 28
+
         try:
             _font = renderer.font_cn_h
             _font.size = 32
@@ -8070,12 +8101,12 @@ while running:
                     break
 
                 if _itype == "user":
-                    # 用户问题：黄色 + > 前缀
-                    _text = "> " + _icontent
-                    _wrapped = _wrap_text_md(_text, _font, WIDTH - _margin_x * 2 - _indent_px)
+                    # 用户问题：蓝色黑体加粗
+                    _text = _icontent
+                    _wrapped = _wrap_text_md(_text, _font_mw_bold, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
                         if _y + _line_h > _max_y - _line_h: break
-                        _surf, _ = _font.render(_wl, _C_USER)
+                        _surf, _ = _font_mw_bold.render(_wl, _C_USER)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
 
@@ -8133,10 +8164,10 @@ while running:
                         _y += _line_h
 
                 elif _itype == "text":
-                    _wrapped = _wrap_text_md(_icontent, _font, WIDTH - _margin_x * 2 - _indent_px)
+                    _wrapped = _wrap_text_md(_icontent, _font_mw_bold, WIDTH - _margin_x * 2 - _indent_px)
                     for _wl in _wrapped:
                         if _y + _line_h > _max_y - _line_h: break
-                        _surf, _ = _font.render(_wl, _icolor)
+                        _surf, _ = _font_mw_bold.render(_wl, _icolor)
                         screen.blit(_surf, (_margin_x + _indent_px, _y))
                         _y += _line_h
 
@@ -8221,78 +8252,16 @@ while running:
             if _chat_cursor_visible and _y < _max_y:
                 pygame.draw.rect(screen, (255, 255, 255), (_margin_x, _y + 2, 4, _line_h - 8))
 
-            # ── 右下角小Q表情：用当前渲染器画到临时surface再缩放 ──
-            _mini_w = 300
-            _mini_h = 200
-            _mini_surf = pygame.Surface((_mini_w, _mini_h))
-            _mini_bg = CuteStyle.BG_COLOR if face_style == 'cute' else (8, 8, 16)
-            _mini_surf.fill(_mini_bg)
-        
+            # ── 右下角 MW 图标 ──
             try:
-                # 临时修改渲染器中心点
-                _orig_cx = active_renderer.face_center_x
-                _orig_cy = active_renderer.face_center_y
-            
-                active_renderer.screen = _mini_surf
-                active_renderer.face_center_x = _mini_w // 2
-                active_renderer.face_center_y = _mini_h // 2 - 10
-            
-                if face_style == 'cute':
-                    # CuteRenderer: 只画眼睛，不画眉毛
-                    _orig_rx = active_renderer.eye_rx
-                    _orig_ry = active_renderer.eye_ry
-                    _orig_sp = active_renderer.eye_spacing
-                    _orig_yo = active_renderer.eye_y_offset
-                
-                    active_renderer.eye_rx = 35
-                    active_renderer.eye_ry = 42
-                    active_renderer.eye_spacing = 80
-                    active_renderer.eye_y_offset = 0
-                
-                    # 先填背景色（draw 会 fill 但确保颜色正确）
-                    _mini_surf.fill(CuteStyle.BG_COLOR)
-                    # 直接画眼睛部分（跳过 draw 方法，手动调 _draw_eye）
-                    _draw_cx = _mini_w // 2
-                    _draw_cy = _mini_h // 2 - 10
-                    _s = sm.current
-                    for side in [-1, 1]:
-                        _ex = _draw_cx + side * 80
-                        _ey = _draw_cy + 0 + (_s.l_y if side < 0 else _s.r_y)
-                        _l_open = _s.l_open if side < 0 else _s.r_open
-                        _l_w = _s.l_w if side < 0 else _s.r_w
-                        _l_cut = _s.l_cut if side < 0 else _s.r_cut
-                        active_renderer._draw_eye(_ex, _ey, _l_open, _l_w, _l_cut, 
-                                                  _s.pupil_scale, _s.highlight, 0, 1.0, side)
-                
-                    active_renderer.eye_rx = _orig_rx
-                    active_renderer.eye_ry = _orig_ry
-                    active_renderer.eye_spacing = _orig_sp
-                    active_renderer.eye_y_offset = _orig_yo
-                else:
-                    # Renderer: eye_r_x, eye_r_y, spacing
-                    _orig_rx = active_renderer.eye_r_x
-                    _orig_ry = active_renderer.eye_r_y
-                    _orig_sp = active_renderer.spacing
-                
-                    active_renderer.eye_r_x = 40
-                    active_renderer.eye_r_y = 42
-                    active_renderer.spacing = 90
-                
-                    active_renderer._draw_body(sm.current, 1.0, 0, 1.0, 1.0, 0, 0, 1.0)
-                
-                    active_renderer.eye_r_x = _orig_rx
-                    active_renderer.eye_r_y = _orig_ry
-                    active_renderer.spacing = _orig_sp
-            
-                active_renderer.face_center_x = _orig_cx
-                active_renderer.face_center_y = _orig_cy
-                active_renderer.screen = screen
+                _mw_icon = pygame.image.load("/home/pi/xiaoq-face-auth-demo/mw_icon.png")
+                _mw_icon_w, _mw_icon_h = _mw_icon.get_size()
+                _target_w = _face_area * 2
+                _target_h = int(_target_w * _mw_icon_h / _mw_icon_w)
+                _mw_scaled = pygame.transform.smoothscale(_mw_icon, (_target_w, _target_h))
+                screen.blit(_mw_scaled, (WIDTH - _target_w - 8, HEIGHT - _target_h - 4))
             except Exception as _e:
-                print(f"[RENDER_ERR] face: {_e}", flush=True)
-        
-            # 缩放到右下角
-            _mini_scaled = pygame.transform.smoothscale(_mini_surf, (_face_area, int(_face_area * _mini_h / _mini_w)))
-            screen.blit(_mini_scaled, (WIDTH - _face_area - 8, HEIGHT - _mini_scaled.get_height() - 4))
+                print(f"[RENDER_ERR] mw_icon: {_e}", flush=True)
         
         except Exception as _render_err:
             print(f"[MW-EXCEPT] {_render_err}", flush=True)
