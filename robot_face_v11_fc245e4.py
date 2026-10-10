@@ -7477,6 +7477,9 @@ _chat_cursor_timer = 0
 _chat_cursor_visible = True
 _pending_mw_reply = None
 _chat_start_idx = 0
+_mw_gif_frames = []
+_mw_gif_idx = 0
+_mw_gif_timer = 0
 
 def _wrap_text_md(text, font, max_width):
     """简单文字换行"""
@@ -7947,8 +7950,39 @@ while running:
             _font_mw_bold = pygame.freetype.Font("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 38)
             _font_mw_normal = renderer.font_cn_h
             _font_mw_normal.size = 28
+            # 加载 GIF 动画帧（用 PIL，只加载一次）
+            if not _mw_gif_frames:
+                try:
+                    from PIL import Image
+                    _pil_gif = Image.open("/home/pi/xiaoq-face-auth-demo/mw_anim.gif")
+                    _gif_w, _gif_h = _pil_gif.size
+                    _scale = min(WIDTH / _gif_w, HEIGHT / _gif_h)
+                    _tw = int(_gif_w * _scale)
+                    _th = int(_gif_h * _scale)
+                    _nframes = getattr(_pil_gif, "n_frames", 1)
+                    for _i in range(_nframes):
+                        _pil_gif.seek(_i)
+                        _rgba = _pil_gif.convert("RGBA")
+                        _raw = _rgba.tobytes()
+                        _surf = pygame.image.fromstring(_raw, (_gif_w, _gif_h), "RGBA")
+                        _surf = pygame.transform.smoothscale(_surf, (_tw, _th))
+                        _mw_gif_frames.append(_surf)
+                    print(f"[GIF] loaded {len(_mw_gif_frames)} frames ({_tw}x{_th})", flush=True)
+                except Exception as _e:
+                    print(f"[GIF] load error: {_e}", flush=True)
 
         try:
+            if _mw_gif_frames:
+                _mw_gif_timer += 1
+                if _mw_gif_timer >= 3:
+                    _mw_gif_timer = 0
+                    _mw_gif_idx = (_mw_gif_idx + 1) % len(_mw_gif_frames)
+                _frame = _mw_gif_frames[_mw_gif_idx]
+                _fx = (WIDTH - _frame.get_width()) // 2
+                _fy = (HEIGHT - _frame.get_height()) // 2
+                screen.blit(_frame, (_fx, _fy))
+                pygame.display.flip()
+                continue
             _font = renderer.font_cn_h
             _font.size = 32
             _line_h = 64
@@ -8060,7 +8094,7 @@ while running:
                     continue
 
                 # 普通文字（拆成多行，每行一个 item）
-                _wrapped_lines = _wrap_text_md(_strip_bold(_t), _font, WIDTH - _margin_x * 2)
+                _wrapped_lines = _wrap_text_md(_strip_bold(_t), _font_mw_bold, WIDTH - _margin_x * 2)
                 for _wl in _wrapped_lines:
                     _render_items.append(("text", _wl, _C_TEXT, 0))
 
@@ -8072,7 +8106,7 @@ while running:
             for _ri in _render_items:
                 _t = str(_ri[1])
                 _indent = _ri[3] * 30
-                _wl = _wrap_text_md(_t, _font, WIDTH - _margin_x * 2 - _indent)
+                _wl = _wrap_text_md(_t, _font_mw_bold, WIDTH - _margin_x * 2 - _indent)
                 _item_lines.append(max(1, len(_wl)))
 
             # 从后往前找起始位置，确保最后一行留一行给光标
