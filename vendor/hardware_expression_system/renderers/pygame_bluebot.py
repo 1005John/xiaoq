@@ -553,11 +553,12 @@ class BluebotPygameRenderer:
     ) -> None:
         if frame.eye_shape.startswith("official_eye"):
             pose = official_pose or self._official_cheek_pose(frame.mouth)
+            cheek_width = 0.100 if frame.mouth == "official_mouth_big_smile" else 0.080
             for x in (self.screen.width * 0.250, self.screen.width * 0.750):
                 cheek_rect = LayoutRect(
-                    x - self.screen.width * 0.040,
+                    x - self.screen.width * cheek_width / 2,
                     self.screen.height * 0.506,
-                    self.screen.width * 0.080,
+                    self.screen.width * cheek_width,
                     self.screen.height * 0.084,
                 )
                 self._draw_radial_glow(pygame, surface, cheek_rect, pose.color, round(pose.alpha))
@@ -868,7 +869,7 @@ class BluebotPygameRenderer:
             for index, length in enumerate(lengths):
                 x = base_x + direction * index * 18
                 y = center_y - length / 2 + self._wave(now_ms, 0.010 + index * 0.002, index) * 2.0
-                alpha = round((24 + 18 * pulse) * opacity)
+                alpha = round((68 + 32 * pulse) * opacity)
                 self._draw_line_glow(pygame, surface, [(x, y), (x, y + length)], color, 3, alpha)
 
     def _draw_warning_band(
@@ -2093,7 +2094,7 @@ class BluebotPygameRenderer:
         if mouth == "official_mouth_help_pout":
             return _OfficialCheekPose((247, 163, 177), 125)
         if mouth == "official_mouth_big_smile":
-            return _OfficialCheekPose((125, 216, 224), 105)
+            return _OfficialCheekPose((255, 134, 173), 156)
         if mouth == "official_mouth_sorry_pout":
             return _OfficialCheekPose((249, 119, 169), 92)
         return _OfficialCheekPose((177, 114, 206), 64 if mouth == "official_mouth_wobble" else 92)
