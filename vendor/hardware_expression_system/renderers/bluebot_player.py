@@ -46,6 +46,12 @@ class BluebotExpressionPlayer:
         self.status = status
         self._started_ms = now_ms
 
+    def reset(self, now_ms: int | None = None) -> None:
+        """Start a fresh visual session when a character becomes active."""
+        self._started_ms = now_ms
+        self._transition = None
+        self._last_layout = None
+
     def draw(self, surface: object, now_ms: int, include_background: bool = True) -> BluebotFaceLayout:
         if self._started_ms is None:
             self._started_ms = now_ms

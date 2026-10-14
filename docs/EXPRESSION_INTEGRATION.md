@@ -28,6 +28,9 @@
 状态命令只接受 `MobileWorkStatus` 定义的 16 个值。无效状态不会改变当前表情。
 产品业务代码必须在状态变化时发送命令。本次接入不从聊天文字或语音状态推断业务状态。
 
+当前网关自动映射：请求开始为 `PLANNING`，网关接受请求后为 `EXPERT_ROUTING`，检测到工具或步骤事件时为 `TOOL_RUNNING`，任务完成为 `COMPLETED`，请求失败或网关异常为 `FAILED`。
+网关没有足够信息时，不自动猜测 `HUMAN_INTERVENTION`、`WAITING_CONFIRMATION` 或其他业务状态。
+
 ## 修改边界
 
 不要直接修改 `vendor/` 中的眼睛、嘴巴、颜色或动效代码。

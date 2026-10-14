@@ -3464,7 +3464,15 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
         """MW Agent Gateway 调用 — 用 curl 子进程避免 segfault"""
         global _chat_lines, _pending_mw_reply
         self._pending = True
+        def _set_expression_status(status):
+            if ws_server:
+                ws_server.command_queue.append({
+                    "type": "mobilework_status",
+                    "status": status,
+                })
+
         print("[GW] start: " + txt[:30], flush=True)
+        _set_expression_status("PLANNING")
         try:
             import subprocess as _sp, json as _json, time as _t, os as _os, glob as _gl, urllib.parse as _up
             _gw = "http://127.0.0.1:9800"
@@ -3484,8 +3492,10 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                          capture_output=True, timeout=35)
             _result = _json.loads(_r.stdout.decode())
             if not _result.get("ok"):
+                _set_expression_status("FAILED")
                 _pending_mw_reply = ("MW不可用", True, reply_path)
                 return
+            _set_expression_status("EXPERT_ROUTING")
             _shown_rowids = set()
             while True:
                 _t.sleep(1)
@@ -3501,6 +3511,8 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                             if not _ptext and _ptype not in ("tool", "step-start", "step-finish", "compaction"):
                                 continue
                             _shown_rowids.add(_prid)
+                            if _ptype in ("tool", "step-start", "step-finish"):
+                                _set_expression_status("TOOL_RUNNING")
                             if _ptype == "text" and ("系统指令" in _ptext or txt.strip() in _ptext):
                                 continue
                             if _ptype == "text" and _ptext:
@@ -3515,6 +3527,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                 _r3 = _sp.run(["curl", "-s", "-m", "5", _gw + "/status"], capture_output=True, timeout=8)
                 _s = _json.loads(_r3.stdout.decode())
                 if _s.get("status") == "done":
+                    _set_expression_status("COMPLETED")
                     # GET result（不再获取 progress，避免覆盖中间输出）
                     _r5 = _sp.run(["curl", "-s", "-m", "5", _gw + "/result"], capture_output=True, timeout=8)
                     _rr = _json.loads(_r5.stdout.decode())
@@ -3545,6 +3558,7 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
                         _pending_mw_reply = ("MW已完成", True, reply_path)
                     return
         except Exception as _e:
+            _set_expression_status("FAILED")
             print("[MW] Error: " + str(_e)[:60], flush=True)
             _pending_mw_reply = ("MW失败", True, reply_path)
         finally:
@@ -4910,7 +4924,9 @@ class WSServer:
             cmd = self.command_queue.pop(0)
             cmd_type = cmd.get("type")
             if cmd_type == "character_set":
-                if not bluebot_controller.set_character(cmd.get("name")):
+                if not bluebot_controller.set_character(
+                    cmd.get("name"), time.monotonic_ns() // 1_000_000
+                ):
                     print("[Bluebot] ignored invalid character_set command")
             elif cmd_type == "mobilework_status":
                 if not bluebot_controller.set_status(cmd.get("status"), time.monotonic_ns() // 1_000_000):

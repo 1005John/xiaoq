@@ -24,7 +24,11 @@ class FakePlayer:
     def __init__(self):
         self.statuses = []
         self.draws = []
+        self.resets = []
         self.fail = False
+
+    def reset(self, now_ms=None):
+        self.resets.append(now_ms)
 
     def set_status(self, status, now_ms):
         self.statuses.append((status, now_ms))
@@ -54,6 +58,11 @@ class BluebotIntegrationTest(unittest.TestCase):
         self.assertIn(("bluebot_controller", "draw"), calls)
         self.assertIn(("renderer", "draw_mobilework_fallback"), calls)
         self.assertIn("WAITING_INPUT", strings)
+        self.assertIn("PLANNING", strings)
+        self.assertIn("EXPERT_ROUTING", strings)
+        self.assertIn("TOOL_RUNNING", strings)
+        self.assertIn("COMPLETED", strings)
+        self.assertIn("FAILED", strings)
 
     def test_explicit_switch_and_status_validation(self):
         player = FakePlayer()
@@ -67,10 +76,13 @@ class BluebotIntegrationTest(unittest.TestCase):
         self.assertTrue(bridge.set_status("blocked", 120))
         self.assertEqual(player.statuses, [(MobileWorkStatus.BLOCKED, 120)])
         self.assertTrue(bridge.set_character("bluebot"))
+        self.assertEqual(player.resets, [None])
         self.assertTrue(bridge.draw(surface, 140))
         self.assertEqual(player.draws, [(surface, 140)])
         self.assertTrue(bridge.set_character("xiaoq"))
         self.assertFalse(bridge.draw(surface, 160))
+        self.assertTrue(bridge.set_character("bluebot", 200))
+        self.assertEqual(player.resets, [None, 200])
 
     def test_renderer_failure_restores_legacy_mode(self):
         player = FakePlayer()

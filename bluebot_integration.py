@@ -13,8 +13,12 @@ class BluebotIntegration:
         self.enabled = False
         self.last_error: str | None = None
 
-    def set_character(self, name: object) -> bool:
+    def set_character(self, name: object, now_ms: int | None = None) -> bool:
         if name == "bluebot":
+            if not self.enabled:
+                reset = getattr(self.player, "reset", None)
+                if reset is not None:
+                    reset(now_ms)
             self.enabled = True
             self.last_error = None
             return True
