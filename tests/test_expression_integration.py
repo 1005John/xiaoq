@@ -56,6 +56,7 @@ class BluebotIntegrationTest(unittest.TestCase):
         self.assertIn(("bluebot_controller", "set_character"), calls)
         self.assertIn(("bluebot_controller", "set_status"), calls)
         self.assertIn(("bluebot_controller", "draw"), calls)
+        self.assertIn(("bluebot_controller", "draw_xiaoq_transition"), calls)
         self.assertIn(("renderer", "draw_mobilework_fallback"), calls)
         self.assertIn("WAITING_INPUT", strings)
         self.assertIn("PLANNING", strings)
@@ -93,6 +94,74 @@ class BluebotIntegrationTest(unittest.TestCase):
         self.assertFalse(bridge.enabled)
         self.assertIn("RuntimeError", bridge.last_error)
 
+    def test_character_switch_and_rapid_reversal_keep_visible_frame(self):
+        class ColorPlayer(FakePlayer):
+            def draw(self, surface, now_ms):
+                surface.fill((0, 45, 110))
+
+        surface = pygame.Surface((64, 36))
+        surface.fill((240, 208, 192))
+        bridge = BluebotIntegration(ColorPlayer())
+        bridge.set_character("bluebot", 1000, surface)
+        self.assertTrue(bridge.draw(surface, 1000))
+        self.assertEqual(surface.get_at((32, 18))[:3], (240, 208, 192))
+
+        bridge.draw(surface, 1120)
+        visible = surface.get_at((32, 18))[:3]
+        bridge.set_character("xiaoq", 1120, surface)
+        surface.fill((240, 208, 192))
+        bridge.draw_xiaoq_transition(surface, 1120)
+        self.assertEqual(surface.get_at((32, 18))[:3], visible)
+
+        surface.fill((240, 208, 192))
+        bridge.draw_xiaoq_transition(surface, 1220)
+        visible = surface.get_at((32, 18))[:3]
+        bridge.set_character("bluebot", 1220, surface)
+        bridge.draw(surface, 1220)
+        self.assertEqual(surface.get_at((32, 18))[:3], visible)
+
+        bridge.set_character("xiaoq", 1220, surface)
+        surface.fill((240, 208, 192))
+        bridge.draw_xiaoq_transition(surface, 1780)
+        self.assertEqual(surface.get_at((32, 18))[:3], (240, 208, 192))
+        self.assertFalse(bridge.transition.active)
+
+    def test_duplicate_character_command_does_not_restart_transition(self):
+        class ColorPlayer(FakePlayer):
+            def draw(self, surface, now_ms):
+                surface.fill((0, 45, 110))
+
+        surface = pygame.Surface((64, 36))
+        surface.fill((240, 208, 192))
+        bridge = BluebotIntegration(ColorPlayer())
+        bridge.set_character("bluebot", 1000, surface)
+        bridge.draw(surface, 1120)
+        bridge.set_character("bluebot", 1120, surface)
+        bridge.draw(surface, 1560)
+        self.assertEqual(surface.get_at((32, 18))[:3], (0, 45, 110))
+        self.assertFalse(bridge.transition.active)
+
+    def test_role_reversal_before_a_draw_keeps_current_frame(self):
+        surface = pygame.Surface((64, 36))
+        surface.fill((240, 208, 192))
+        bridge = BluebotIntegration(FakePlayer())
+        bridge.set_character("bluebot", 1000, surface)
+        bridge.set_character("xiaoq", 1000, surface)
+        self.assertFalse(bridge.enabled)
+        self.assertFalse(bridge.transition.active)
+        surface.fill((240, 208, 192))
+        bridge.draw_xiaoq_transition(surface, 1240)
+        self.assertEqual(surface.get_at((32, 18))[:3], (240, 208, 192))
+
+    def test_failed_bluebot_draw_cancels_switch(self):
+        player = FakePlayer()
+        player.fail = True
+        bridge = BluebotIntegration(player)
+        surface = pygame.Surface((64, 36))
+        bridge.set_character("bluebot", 100, surface)
+        self.assertFalse(bridge.draw(surface, 120))
+        self.assertFalse(bridge.transition.active)
+
 
 class RenderSmokeTest(unittest.TestCase):
     @classmethod
@@ -126,6 +195,28 @@ class RenderSmokeTest(unittest.TestCase):
         self.assertEqual(self.surface.get_at((350, 310))[:3], (232, 248, 245))
         self.assertEqual(renderer.get_neon_color(), neon)
         self.assertEqual(CuteStyle.PUPIL_COLOR, pupil)
+
+    def test_character_switch_round_trip_with_both_xiaoq_styles(self):
+        for style, renderer_type, idle in (
+            ("cute", CuteRenderer, CUTE_IDLE_P),
+            ("neon", Renderer, IDLE_P),
+        ):
+            with self.subTest(style=style):
+                xiaoq = renderer_type(self.surface)
+                xiaoq.draw(idle)
+                xiaoq_pixel = self.surface.get_at((0, 0))[:3]
+                bridge = BluebotIntegration()
+                bridge.set_character("bluebot", 1000, self.surface)
+                for offset in (0, 60, 230, 290, 560):
+                    self.assertTrue(bridge.draw(self.surface, 1000 + offset))
+                self.assertNotEqual(self.surface.get_at((0, 0))[:3], xiaoq_pixel)
+
+                bridge.set_character("xiaoq", 1600, self.surface)
+                for offset in (0, 60, 230, 290, 560):
+                    xiaoq.draw(idle)
+                    expected = self.surface.get_at((0, 0))[:3]
+                    bridge.draw_xiaoq_transition(self.surface, 1600 + offset)
+                self.assertEqual(self.surface.get_at((0, 0))[:3], expected)
 
 
 if __name__ == "__main__":

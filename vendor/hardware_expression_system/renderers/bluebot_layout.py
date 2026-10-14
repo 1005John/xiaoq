@@ -136,9 +136,9 @@ class BluebotLayoutEngine:
         is_wide_pressure = frame.eye_shape.startswith("wide_pressure")
 
         if is_official:
-            eye_scale *= 1.23
-            eye_gap = self.screen.width * 0.340 - 2.0 * self._clamp(frame.eye_convergence, 0.0, 24.0)
-            eye_y = self.screen.height * 0.448 + frame.eye_offset_y
+            eye_scale *= 1.415
+            eye_gap = self.screen.width * 0.350 - 2.0 * self._clamp(frame.eye_convergence, 0.0, 24.0)
+            eye_y = self.screen.height * 0.442 + frame.eye_offset_y
             left_x = self.screen.width / 2 - eye_gap / 2 + frame.eye_offset_x + frame.eye_shift_left
             right_x = self.screen.width / 2 + eye_gap / 2 + frame.eye_offset_x + frame.eye_shift_right
             if frame.eye_shape == "official_eye_vertical":
@@ -330,7 +330,7 @@ class BluebotLayoutEngine:
         if frame.mouth == "grimace":
             mouth_width = core.width * 0.24
         if frame.mouth.startswith("official_mouth"):
-            mouth_width *= 0.78
+            mouth_width *= 0.86
             mouth_width *= self._clamp(frame.mouth_scale, 0.75, 1.20)
         mouth_width = min(
             mouth_width,
@@ -402,7 +402,7 @@ class BluebotLayoutEngine:
         else:
             mouth_height += core.height * 0.018 * pulse * profile.activity_level
         if frame.mouth.startswith("official_mouth"):
-            mouth_height *= 0.85
+            mouth_height *= 0.92
             mouth_height *= self._clamp(frame.mouth_scale, 0.75, 1.20)
         mouth_y = core.y + core.height * 0.73
         if frame.mouth in {"pout_bridge", "pout_bridge_soft", "pout_bridge_round", "pout_bridge_deep"}:
@@ -424,7 +424,7 @@ class BluebotLayoutEngine:
         if frame.mouth.startswith("fail_apology_pout_v55"):
             mouth_y = self.screen.height * 0.716
         if frame.mouth.startswith("official_mouth"):
-            mouth_y = self.screen.height * 0.613 + frame.mouth_offset_y
+            mouth_y = self.screen.height * 0.635 + frame.mouth_offset_y
         if frame.mouth in {"official_mouth_sorry_pout", "official_mouth_big_smile"}:
             mouth_y += frame.eye_offset_y
         if frame.mouth.startswith("failed_stress_capsule"):
@@ -435,6 +435,8 @@ class BluebotLayoutEngine:
             mouth_y = self.screen.height * 0.704
         if frame.mouth.startswith("pressure_grimace"):
             mouth_y = self.screen.height * 0.700
+        if frame.mouth.startswith("official_mouth"):
+            mouth_y = max(mouth_y, max(left_eye.bottom, right_eye.bottom) + 8.0 + max(14.0, mouth_height) / 2)
         mouth = self._rect_from_center(
             core.x + core.width / 2 + frame.eye_offset_x * 0.2,
             mouth_y,

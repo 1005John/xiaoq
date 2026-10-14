@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1] / "vendor/hardware_expression_system"
-EXPECTED_SHA256 = "6af68e90bc06783822381c5734ce54735da6da0c7602eefc733744f4cc85fea8"
-EXPECTED_FILES = 22
+EXPECTED_SHA256 = "61de8bd62e774562234b8e5663f7d8f24873c638a8d0f9eda8925b238d0c7d5d"
+EXPECTED_FILES = 23
 
 
 def package_digest(root: Path) -> tuple[int, str]:

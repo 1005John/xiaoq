@@ -18,6 +18,7 @@ from .motion_profiles import (
 )
 from .pygame_bluebot import BluebotPygameRenderer, BluebotPygameTheme
 from .bluebot_player import BluebotExpressionPlayer
+from .character_transition import CharacterSwitchTransition
 
 __all__ = [
     "BluebotFaceLayout",
@@ -26,6 +27,7 @@ __all__ = [
     "BluebotPygameRenderer",
     "BluebotPygameTheme",
     "BluebotExpressionPlayer",
+    "CharacterSwitchTransition",
     "LayoutRect",
     "ExpressionMotionProfile",
     "MOTION_PROFILES",

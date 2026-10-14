@@ -4925,7 +4925,7 @@ class WSServer:
             cmd_type = cmd.get("type")
             if cmd_type == "character_set":
                 if not bluebot_controller.set_character(
-                    cmd.get("name"), time.monotonic_ns() // 1_000_000
+                    cmd.get("name"), time.monotonic_ns() // 1_000_000, screen
                 ):
                     print("[Bluebot] ignored invalid character_set command")
             elif cmd_type == "mobilework_status":
@@ -6038,6 +6038,7 @@ while running:
                 screen.blit(_mw_scaled, (WIDTH - _target_w - 8, HEIGHT - _target_h - 4))
             except:
                 pass
+            bluebot_controller.draw_xiaoq_transition(screen, time.monotonic_ns() // 1_000_000)
             pygame.display.flip()
             continue
             # 以下代码不执行（MW 模式直接 continue）
@@ -6437,6 +6438,7 @@ while running:
         }
         active_renderer.draw_hud(hud_info)
 
+    bluebot_controller.draw_xiaoq_transition(screen, time.monotonic_ns() // 1_000_000)
     pygame.display.flip()
 
 if gimbal_ctrl is not None:
