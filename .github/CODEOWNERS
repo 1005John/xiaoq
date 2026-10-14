@@ -1,0 +1,8 @@
+# Expression runtime and integration contract. Enable required code-owner review
+# in the main-branch ruleset; this file alone does not block changes.
+/vendor/hardware_expression_system/ @1005John
+/bluebot_integration.py @1005John
+/tools/check_expression_snapshot.py @1005John
+/tests/test_expression_integration.py @1005John
+/.github/CODEOWNERS @1005John
+/.github/workflows/expression-guard.yml @1005John
