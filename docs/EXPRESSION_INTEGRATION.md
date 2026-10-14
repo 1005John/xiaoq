@@ -18,8 +18,11 @@
 {"type":"character_set","name":"xiaoq"}
 ```
 
-系统默认显示小Q。状态命令不会自动切换角色。启用 Bluebot 后，它的表情画面优先于旧的 MobileWork 聊天和 GIF 画面。
-如果 Bluebot 绘制失败，系统关闭 Bluebot，并在同一帧恢复旧画面。
+系统默认显示小Q。语音进入 MobileWork 模式时，主程序自动启用 Bluebot，并设为 `WAITING_INPUT`。
+退出该模式时，主程序切回小Q。状态命令本身不会切换角色。
+启用 Bluebot 后，它的表情画面优先于旧的 MobileWork 聊天画面。
+如果 Bluebot 绘制失败，系统关闭 Bluebot，并在同一帧显示产品团队的临时霓虹画面。
+该临时画面不是 `m-official` 风格，不能作为视觉验收依据。
 小Q的 `cute` 和 `neon` 人格切换保持不变。
 
 状态命令只接受 `MobileWorkStatus` 定义的 16 个值。无效状态不会改变当前表情。

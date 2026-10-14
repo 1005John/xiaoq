@@ -15,6 +15,7 @@ from vendor.hardware_expression_system.characters.xiaoq_visuals import (
     CUTE_IDLE_P,
     IDLE_P,
     CuteRenderer,
+    CuteStyle,
     Renderer,
 )
 
@@ -51,6 +52,8 @@ class BluebotIntegrationTest(unittest.TestCase):
         self.assertIn(("bluebot_controller", "set_character"), calls)
         self.assertIn(("bluebot_controller", "set_status"), calls)
         self.assertIn(("bluebot_controller", "draw"), calls)
+        self.assertIn(("renderer", "draw_mobilework_fallback"), calls)
+        self.assertIn("WAITING_INPUT", strings)
 
     def test_explicit_switch_and_status_validation(self):
         player = FakePlayer()
@@ -101,6 +104,16 @@ class RenderSmokeTest(unittest.TestCase):
         Renderer(self.surface).draw(IDLE_P)
         CuteRenderer(self.surface).draw(CUTE_IDLE_P)
         self.assertEqual(self.surface.get_at((0, 0))[:3], (240, 208, 192))
+
+    def test_mobilework_fallback_does_not_change_xiaoq_palette(self):
+        renderer = Renderer(self.surface)
+        neon = renderer.get_neon_color()
+        pupil = CuteStyle.PUPIL_COLOR
+        renderer.draw_mobilework_fallback(IDLE_P)
+        self.assertEqual(self.surface.get_at((0, 0))[:3], (0, 71, 187))
+        self.assertEqual(self.surface.get_at((350, 310))[:3], (232, 248, 245))
+        self.assertEqual(renderer.get_neon_color(), neon)
+        self.assertEqual(CuteStyle.PUPIL_COLOR, pupil)
 
 
 if __name__ == "__main__":

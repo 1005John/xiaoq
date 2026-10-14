@@ -1295,6 +1295,7 @@ class Renderer:
         self.pupil_mode = "normal"      # "normal"/"heart"/"star"
         self._pupil_mode_timer = 0.0
         self._current_bg = BG_COLOR     # 动态背景色
+        self._mw_neon_override = False
 
         # v10: 霓虹色状态 — 当前/目标/过渡
         self._neon_current = list(StyleConfig.NEON_DEFAULT)  # 当前霓虹色(浮点)
@@ -1363,9 +1364,20 @@ class Renderer:
 
     def get_neon_color(self):
         """获取当前插值后的霓虹色(RGB)"""
+        if self._mw_neon_override:
+            return (232, 248, 245)
         return (int(self._neon_current[0]),
                 int(self._neon_current[1]),
                 int(self._neon_current[2]))
+
+    def draw_mobilework_fallback(self, state):
+        """Draw the product team's temporary MW face when Bluebot is unavailable."""
+        self.screen.fill((0, 71, 187))
+        self._mw_neon_override = True
+        try:
+            self._draw_body(state, 1.0, 0, 1.0, 1.0, 0, 0, 1.0)
+        finally:
+            self._mw_neon_override = False
 
     def set_pupil_mode(self, mode, duration=3.0):
         """设置瞳孔特殊形态: normal/heart/star"""
@@ -1504,6 +1516,10 @@ class Renderer:
 
     def _draw_neon_eye(self, ex, ey, rw, rh, neon):
         """v10: 霓虹几何眼 — 无硬边外框，bloom渐变过渡到眼底"""
+        if self._mw_neon_override:
+            pygame.draw.ellipse(self.screen, (232, 248, 245),
+                                (ex - rw, ey - rh, rw * 2, rh * 2))
+            return
         bloom_pulse = 0.7 + 0.3 * math.sin(self._bloom_phase)
 
         # 1) 外发光(bloom) — 从眼底边缘到外层渐变，替代硬描边
@@ -2137,7 +2153,8 @@ class CuteRenderer:
         if self.pupil_mode == "heart": self._draw_heart_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
         elif self.pupil_mode == "star": self._draw_star_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
         ww = int(bw * 1.52); wh = int(bh * 1.04)  # 宽椭圆(80%)
-        pygame.draw.ellipse(self.screen, (250, 250, 250), (px - ww, py - wh, ww * 2, wh * 2))
+        pygame.draw.ellipse(self.screen, getattr(self, 'eye_white_color', (250, 250, 250)),
+                            (px - ww, py - wh, ww * 2, wh * 2))
         pw = int(ww * 0.7); ph = int(wh * 0.7)  # 白圈70%比例
         pygame.draw.ellipse(self.screen, CuteStyle.PUPIL_COLOR, (px - pw, py - ph, pw * 2, ph * 2))
         if cut_pixels > 0:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1] / "vendor/hardware_expression_system"
-EXPECTED_SHA256 = "bb504574810404e018814d4acf35f8eee6cecb29db8a8b6fa8b49a638605c633"
+EXPECTED_SHA256 = "4823084195d6d0f1f3e59386a1d8feea7b06183a7c25a9674a952173c73d1b34"
 EXPECTED_FILES = 22
 
 
