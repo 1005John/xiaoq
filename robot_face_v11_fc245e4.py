@@ -24,6 +24,10 @@ import wave, struct, subprocess as _subprocess
 import socket
 from gimbal_driver import GimbalController
 from hailo_face import HailoFace
+try:
+    from camera_proxy import CameraProxy
+except ImportError:
+    CameraProxy = None
 from face_identity import FaceRegistry
 from skills.data_collector import DataCollector
 from skills.name_corrector import correct
@@ -3085,6 +3089,9 @@ class Renderer:
 
     def get_neon_color(self):
         """获取当前插值后的霓虹色(RGB)"""
+        # MW 模式覆盖
+        if getattr(self, '_mw_neon_override', False):
+            return (232, 248, 245)  # #E8F8F5
         return (int(self._neon_current[0]),
                 int(self._neon_current[1]),
                 int(self._neon_current[2]))
@@ -3226,6 +3233,12 @@ class Renderer:
 
     def _draw_neon_eye(self, ex, ey, rw, rh, neon):
         """v10: 霓虹几何眼 — 无硬边外框，bloom渐变过渡到眼底"""
+        # MW 模式：纯色椭圆，不分层
+        if getattr(self, '_mw_neon_override', False):
+            mw_color = (232, 248, 245)  # #E8F8F5
+            pygame.draw.ellipse(self.screen, mw_color, (ex - rw, ey - rh, rw * 2, rh * 2))
+            return
+
         bloom_pulse = 0.7 + 0.3 * math.sin(self._bloom_phase)
 
         # 1) 外发光(bloom) — 从眼底边缘到外层渐变，替代硬描边
@@ -3250,7 +3263,8 @@ class Renderer:
         eye_surf = pygame.Surface((rw * 2 + 10, rh * 2 + 10), pygame.SRCALPHA)
         eye_surf.fill((0, 0, 0, 0))
         # 眼底颜色跟随表情霓虹色变化: 基础蓝灰 + 霓虹色混合
-        base_col = (25, 40, 70)  # 基础蓝灰
+        # MW 模式下 base_col 也统一为目标颜色
+        base_col = (232, 248, 245) if getattr(self, '_mw_neon_override', False) else (25, 40, 70)
         blends = [(0.05, 120), (0.18, 190), (0.35, 245)]  # (霓虹占比, alpha)
         eye_layers = []
         for bf, al in blends:
@@ -3280,12 +3294,13 @@ class Renderer:
                           (rw - cw + 2, rh - ch + 2, cw * 2, ch * 2))
         self.screen.blit(glow_surf, (ex - rw - 2, ey - rh - 2))
 
-        # 4) 霓虹瞳孔(再大) + 白色高光
+        # 4) 霓虹瞳孔(再大) + 高光
         pupil_r = max(8, int(min(rw, rh) * 0.52))
         bright_neon = tuple(min(255, int(c * 1.5)) for c in neon)
         pygame.draw.circle(self.screen, bright_neon, (ex, ey - int(rh * 0.05)), pupil_r)
         hl_r = max(1, pupil_r // 3)
-        pygame.draw.circle(self.screen, (255, 255, 255),
+        hl_color = (232, 248, 245) if getattr(self, '_mw_neon_override', False) else (255, 255, 255)
+        pygame.draw.circle(self.screen, hl_color,
                          (ex - int(pupil_r * 0.4), ey - int(rh * 0.05) - int(pupil_r * 0.4)), hl_r)
 
     def _draw_mouth(self, cx, cy, sp, rx, ry, s, face_scale, neon):
@@ -3858,7 +3873,7 @@ class CuteRenderer:
         if self.pupil_mode == "heart": self._draw_heart_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
         elif self.pupil_mode == "star": self._draw_star_eye(px, py, bw, bh, cut_pixels, hl, face_scale); return
         ww = int(bw * 1.52); wh = int(bh * 1.04)  # 宽椭圆(80%)
-        pygame.draw.ellipse(self.screen, (250, 250, 250), (px - ww, py - wh, ww * 2, wh * 2))
+        pygame.draw.ellipse(self.screen, getattr(self, 'eye_white_color', (250, 250, 250)), (px - ww, py - wh, ww * 2, wh * 2))
         pw = int(ww * 0.7); ph = int(wh * 0.7)  # 白圈70%比例
         pygame.draw.ellipse(self.screen, CuteStyle.PUPIL_COLOR, (px - pw, py - ph, pw * 2, ph * 2))
         if cut_pixels > 0:
@@ -4725,6 +4740,8 @@ class VoiceManager:
         photo_captured = _capture_face_authorization_failure_photo()
         self.reply_text = reply
         self._write_mobile_reply(reply_path, "completed", reply)
+        self._pending = False
+        self.state = "idle"
         if ws_server:
             card_lines = [reply]
             if photo_captured:
@@ -4952,10 +4969,10 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
         import time as _time
         self._proc_start = _time.time()
         try:
-            # 跳过人脸授权检查（HailoFace 未启动）
-            # if not self._face_authorized_for_dialogue():
-            #     self._finish_face_authorization_failure(speak=speak)
-            #     return
+            # 人脸授权检查（指定人脸时只有指定人才能对话）
+            if not self._face_authorized_for_dialogue():
+                self._finish_face_authorization_failure(speak=speak)
+                return
             # 调试: 写ASR开始标记
             with open('/tmp/voice_debug.txt','w') as _f:
                 _f.write(f"wav={wav_path} size={os.path.getsize(wav_path) if os.path.exists(wav_path) else 0}\\n")
@@ -5317,7 +5334,8 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
         global _chat_mode
         self.reply_text = reply
         self._write_mobile_reply(reply_path, "completed", reply)
-        if ws_server and not _chat_mode:
+        # 不弹 card_show（避免 TTS 被停止）
+        if False:
             ws_server.command_queue.append({
                 "type": "card_show",
                 "title": "回复",
@@ -5571,6 +5589,11 @@ skill 只能是：email、todo、weather、news、meeting、remote_laptop、esp3
             return
         if txt and ("退出移动办公" in txt or "退出办公" in txt):
             _chat_mode = False
+            # 恢复 MW 模式修改的颜色
+            CuteStyle.PUPIL_COLOR = (0, 0, 0)
+            CuteStyle.PUPIL_HIGHLIGHT = (255, 255, 255)
+            StyleConfig.BG_COLOR_RGB = (10, 10, 15)
+            renderer._mw_neon_override = False
             self.state = "speaking"
             self.tts("已退出移动办公模式",
                 on_start=lambda: setattr(self, "state", "speaking"),
@@ -7004,6 +7027,12 @@ class WSServer:
             elif cmd_type == "face_register":
                 _wake_from_sleep("face registration")
                 accepted, message = face_registry.start_enrollment(cmd.get("name", ""))
+                # 同步到 camera_worker 子进程
+                if _camera_proxy is not None:
+                    try:
+                        _camera_proxy.send({"cmd": "enroll", "name": cmd.get("name", "")})
+                    except:
+                        pass
                 if accepted:
                     _start_face_tracking()
                     card_mgr.show("人脸注册", ["请面对摄像头", "正在采集清晰人脸特征"], "todo")
@@ -7018,6 +7047,12 @@ class WSServer:
             elif cmd_type == "face_target_select":
                 _wake_from_sleep("face target selected")
                 accepted, message = face_registry.select_active(cmd.get("person_id"))
+                # 同步到 camera_worker 子进程
+                if _camera_proxy is not None:
+                    try:
+                        _camera_proxy.send({"cmd": "select_active", "person_id": cmd.get("person_id", "")})
+                    except:
+                        pass
                 if accepted:
                     sm.last_gimbal_expr = ""
                     card_mgr.show("人脸跟随", [message], "todo")
@@ -7026,6 +7061,12 @@ class WSServer:
                     card_mgr.show("人脸跟随失败", [message], "todo")
             elif cmd_type == "face_delete":
                 accepted, message = face_registry.delete(cmd.get("person_id", ""))
+                # 同步到 camera_worker 子进程
+                if _camera_proxy is not None:
+                    try:
+                        _camera_proxy.send({"cmd": "delete_person", "person_id": cmd.get("person_id", "")})
+                    except:
+                        pass
                 card_mgr.show("人脸管理", [message], "todo")
                 print(f"[Face] {message}")
             elif cmd_type == "face_auth_snapshot":
@@ -7480,6 +7521,7 @@ _chat_start_idx = 0
 _mw_gif_frames = []
 _mw_gif_idx = 0
 _mw_gif_timer = 0
+_camera_proxy = None  # 摄像头子进程代理
 
 def _wrap_text_md(text, font, max_width):
     """简单文字换行"""
@@ -7607,19 +7649,42 @@ def _capture_face_authorization_failure_photo():
 
 
 def _start_face_tracking():
-    """HailoFace 已禁用 — picamera2 + GStreamer 管线会导致 segfault"""
-    global _face_search, _face_search_active
-    _face_search = None
-    _face_search_active = False
-    return
+    """通过子进程启动 HailoFace 人脸检测与跟踪"""
+    global _face_search, _face_search_active, _camera_proxy
+    if _face_search_active or _mobile_camera_reserved:
+        return
+    if CameraProxy is None:
+        print("[Face] CameraProxy not available", flush=True)
+        return
+    try:
+        _camera_proxy = CameraProxy(gimbal_ctrl)
+        if not _camera_proxy.start():
+            print("[Face] CameraProxy start failed", flush=True)
+            _camera_proxy = None
+            return
+        # 发送 start 命令
+        evt = _camera_proxy.send({"cmd": "start"})
+        if evt and evt.get("event") == "started":
+            _face_search = _camera_proxy  # 兼容旧代码的 _face_search 引用
+            _face_search_active = True
+            print("[Face] 人脸检测已启动（子进程模式）", flush=True)
+        else:
+            print(f"[Face] start event: {evt}", flush=True)
+            _camera_proxy.stop()
+            _camera_proxy = None
+    except Exception as e:
+        print(f"[Face] 启动失败: {e}", flush=True)
+        _camera_proxy = None
 def _stop_face_tracking():
-    """Release the camera before the mobile app takes manual or visual control."""
-    global _face_search, _face_search_active
-    if _face_search is not None:
+    """停止子进程摄像头"""
+    global _face_search, _face_search_active, _camera_proxy
+    if _camera_proxy is not None:
         try:
-            _face_search.stop()
-        except Exception as _face_error:
-            print(f"[Face] 停止人脸追踪失败: {_face_error}")
+            _camera_proxy.stop()
+            print("[Face] 子进程已停止", flush=True)
+        except Exception as e:
+            print(f"[Face] 停止失败: {e}", flush=True)
+    _camera_proxy = None
     _face_search = None
     _face_search_active = False
 
@@ -7810,13 +7875,11 @@ while running:
     if _is_sleeping and voice_mgr.state != "idle":
         _wake_from_sleep(f"voice state={voice_mgr.state}")
     _selected_face_id = face_registry.active_person_id()
-    _face_tracking_requested = bool(_selected_face_id) and not _is_sleeping
+    _face_tracking_requested = not _is_sleeping
     if _face_search_active and _face_search is not None:
-        if ((_is_sleeping and not _face_tracking_requested)
-                or mobile_gimbal_is_manual() or _mobile_camera_reserved):
+        if (mobile_gimbal_is_manual() or _mobile_camera_reserved):
             _stop_face_tracking()
-    elif ((not _is_sleeping or _face_tracking_requested)
-          and not mobile_gimbal_is_manual() and not _mobile_camera_reserved):
+    elif (not mobile_gimbal_is_manual() and not _mobile_camera_reserved):
         _start_face_tracking()
 
     # A selected person may leave while other faces remain.  Detection must
@@ -7934,7 +7997,10 @@ while running:
 
         # MW 模式统一配色（不管元气型还是霓虹型）
         if _chat_mode:
-            screen.fill((242, 247, 252))  # #F2F7FC 背景
+            # MW 模式：用霓虹表情，背景#0047BB，眼睛#E8F8F5
+            screen.fill((0, 71, 187))  # #0047BB 背景
+            # 临时覆盖眼睛颜色
+            CuteStyle.PUPIL_COLOR = (232, 248, 245)  # #E8F8F5
             _C_USER = (58, 117, 229)      # #3A75E5 问题（蓝色）
             _C_TEXT = (0, 0, 0)           # #000000 回答（黑色）
             _C_REASON = (130, 130, 130)   # 灰色思考
@@ -7972,17 +8038,38 @@ while running:
                     print(f"[GIF] load error: {_e}", flush=True)
 
         try:
-            if _mw_gif_frames:
-                _mw_gif_timer += 1
-                if _mw_gif_timer >= 3:
-                    _mw_gif_timer = 0
-                    _mw_gif_idx = (_mw_gif_idx + 1) % len(_mw_gif_frames)
-                _frame = _mw_gif_frames[_mw_gif_idx]
-                _fx = (WIDTH - _frame.get_width()) // 2
-                _fy = (HEIGHT - _frame.get_height()) // 2
-                screen.blit(_frame, (_fx, _fy))
-                pygame.display.flip()
-                continue
+            # MW 模式：用霓虹型渲染器画表情（不画背景）
+            _mw_renderer = renderer
+            # 保存原始颜色
+            _orig_pupil = CuteStyle.PUPIL_COLOR
+            # 设置 MW 颜色
+            CuteStyle.PUPIL_COLOR = (232, 248, 245)  # #E8F8F5 眼睛
+            _mw_renderer.eye_white_color = (232, 248, 245)  # #E8F8F5 外层
+            _orig_highlight = CuteStyle.PUPIL_HIGHLIGHT
+            CuteStyle.PUPIL_HIGHLIGHT = (232, 248, 245)  # #E8F8F5 高光也统一
+            _orig_bg = StyleConfig.BG_COLOR_RGB
+            StyleConfig.BG_COLOR_RGB = (0, 71, 187)  # #0047BB 背景
+            _mw_renderer._mw_neon_override = True  # 霓虹色统一覆盖
+            # 只画表情（不画环境背景和光晕）
+            _mw_renderer._draw_body(sm.current, 1.0, 0, 1.0, 1.0, 0, 0, 1.0)
+            # 恢复颜色
+            CuteStyle.PUPIL_COLOR = _orig_pupil
+            CuteStyle.PUPIL_HIGHLIGHT = _orig_highlight
+            StyleConfig.BG_COLOR_RGB = _orig_bg
+            _mw_renderer._mw_neon_override = False
+            # 右下角 MW 图标
+            try:
+                _mw_icon = pygame.image.load("/home/pi/xiaoq-face-auth-demo/mw_icon.png")
+                _mw_icon_w, _mw_icon_h = _mw_icon.get_size()
+                _target_w = 80 * 2
+                _target_h = int(_target_w * _mw_icon_h / _mw_icon_w)
+                _mw_scaled = pygame.transform.smoothscale(_mw_icon, (_target_w, _target_h))
+                screen.blit(_mw_scaled, (WIDTH - _target_w - 8, HEIGHT - _target_h - 4))
+            except:
+                pass
+            pygame.display.flip()
+            continue
+            # 以下代码不执行（MW 模式直接 continue）
             _font = renderer.font_cn_h
             _font.size = 32
             _line_h = 64
