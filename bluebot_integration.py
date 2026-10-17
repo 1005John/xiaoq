@@ -42,14 +42,15 @@ class BluebotIntegration:
             self.transition.cancel()
             self._switch_pending = False
             return
-        self._start_transition(surface, now_ms)
+        self._start_transition(surface, now_ms, name)
         self._switch_pending = True
 
-    def _start_transition(self, surface: object | None, now_ms: int | None) -> None:
+    def _start_transition(self, surface: object | None, now_ms: int | None, target: str) -> None:
         if surface is None or now_ms is None:
             self.transition.cancel()
         else:
-            self.transition.start(surface, now_ms)
+            accent = (110, 229, 255) if target == "bluebot" else (255, 209, 184)
+            self.transition.start(surface, now_ms, accent)
 
     def set_status(self, value: object, now_ms: int) -> bool:
         if not isinstance(value, str):

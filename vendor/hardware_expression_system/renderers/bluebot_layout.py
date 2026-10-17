@@ -445,6 +445,23 @@ class BluebotLayoutEngine:
             core,
         )
 
+        if is_official:
+            center_x = self.screen.width / 2
+            center_y = self.screen.height / 2
+
+            def enlarge(rect: LayoutRect) -> LayoutRect:
+                return self._rect_from_center(
+                    center_x + (rect.center_x - center_x) * 1.10,
+                    center_y + (rect.center_y - center_y) * 1.10,
+                    rect.width * 1.10,
+                    rect.height * 1.10,
+                    core,
+                )
+
+            left_eye = enlarge(left_eye)
+            right_eye = enlarge(right_eye)
+            mouth = enlarge(mouth)
+
         cheek_size = core.width * (0.062 + 0.03 * self._clamp(frame.cheek, 0.0, 1.0))
         cheek_y = core.y + core.height * 0.63
         cheek_gap = core.width * 0.42

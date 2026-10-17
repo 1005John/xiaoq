@@ -9,31 +9,27 @@ if TYPE_CHECKING:
 
 
 class CharacterSwitchTransition:
-    """Fade through the target face field without overlapping two faces."""
+    """Reveal the live target from the center while the old frame stays visible."""
 
     def __init__(self, duration_ms: int = 560) -> None:
         if duration_ms <= 0:
             raise ValueError("duration_ms must be positive")
         self.duration_ms = duration_ms
         self._source: pygame.Surface | None = None
-        self._field: pygame.Surface | None = None
-        self._field_color = (16, 36, 67)
+        self._accent = (110, 229, 255)
         self._started_ms = 0
 
     @property
     def active(self) -> bool:
         return self._source is not None
 
-    def start(self, visible_frame: pygame.Surface, now_ms: int) -> None:
-        import pygame
-
+    def start(self, visible_frame: pygame.Surface, now_ms: int, accent: tuple[int, int, int] = (110, 229, 255)) -> None:
         self._source = visible_frame.copy()
-        self._field = pygame.Surface(visible_frame.get_size(), pygame.SRCALPHA)
+        self._accent = accent
         self._started_ms = now_ms
 
     def cancel(self) -> None:
         self._source = None
-        self._field = None
 
     def apply(self, target: pygame.Surface, now_ms: int) -> bool:
         """Compose over an already drawn target. Return whether motion remains."""
@@ -49,19 +45,24 @@ class CharacterSwitchTransition:
             self.cancel()
             return False
 
-        hold_end = self.duration_ms * 60 / 560
-        fade_end = self.duration_ms * 230 / 560
-        blank_end = self.duration_ms * 290 / 560
-        if elapsed < fade_end:
-            fade = 0.0 if elapsed < hold_end else self._ease((elapsed - hold_end) / (fade_end - hold_end))
-            target.fill(self._field_color)
-            source.set_alpha(round(255 * (1.0 - fade)))
-            target.blit(source, (0, 0))
-        else:
-            fade = 0.0 if elapsed < blank_end else self._ease((elapsed - blank_end) / (self.duration_ms - blank_end))
-            assert self._field is not None
-            self._field.fill((*self._field_color, round(255 * (1.0 - fade))))
-            target.blit(self._field, (0, 0))
+        import pygame
+
+        width, height = target.get_size()
+        progress = self._ease(elapsed / self.duration_ms)
+        half_open = round(width * 0.5 * progress)
+        left = width // 2 - half_open
+        right = width // 2 + half_open
+        if left > 0:
+            target.blit(source, (0, 0), (0, 0, left, height))
+        if right < width:
+            target.blit(source, (right, 0), (right, 0, width - right, height))
+
+        if 0 < half_open < width // 2:
+            alpha = round(120 * (1.0 - progress))
+            edge = pygame.Surface((5, height), pygame.SRCALPHA)
+            edge.fill((*self._accent, alpha))
+            target.blit(edge, (left - 2, 0))
+            target.blit(edge, (right - 2, 0))
         return True
 
     @staticmethod

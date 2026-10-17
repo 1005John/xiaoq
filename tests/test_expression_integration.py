@@ -126,6 +126,26 @@ class BluebotIntegrationTest(unittest.TestCase):
         self.assertEqual(surface.get_at((32, 18))[:3], (240, 208, 192))
         self.assertFalse(bridge.transition.active)
 
+    def test_character_switch_reveals_live_target_without_blank_field(self):
+        class ColorPlayer(FakePlayer):
+            def draw(self, surface, now_ms):
+                surface.fill((0, 45, 110))
+
+        surface = pygame.Surface((128, 72))
+        surface.fill((240, 208, 192))
+        bridge = BluebotIntegration(ColorPlayer())
+        bridge.set_character("bluebot", 1000, surface)
+        self.assertTrue(bridge.draw(surface, 1220))
+        self.assertEqual(surface.get_at((64, 36))[:3], (0, 45, 110))
+        self.assertEqual(surface.get_at((2, 36))[:3], (240, 208, 192))
+
+        bridge.draw(surface, 1560)
+        bridge.set_character("xiaoq", 1600, surface)
+        surface.fill((240, 208, 192))
+        bridge.draw_xiaoq_transition(surface, 1820)
+        self.assertEqual(surface.get_at((64, 36))[:3], (240, 208, 192))
+        self.assertEqual(surface.get_at((2, 36))[:3], (0, 45, 110))
+
     def test_duplicate_character_command_does_not_restart_transition(self):
         class ColorPlayer(FakePlayer):
             def draw(self, surface, now_ms):
